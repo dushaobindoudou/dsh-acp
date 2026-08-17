@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The default model is read per `session/new` instead of being captured once
+  at plugin mount: sessions now follow config-store defaults and in-GUI model
+  switches (a mount-time snapshot could pin a stale pre-config-load selection).
+
+### Fixed
+
 - A turn that ends in `error` (transport, auth, quota - e.g. a broken
   provider baseURL) no longer resolves `session/prompt` as a silent empty
   `end_turn`: the request now fails with a JSON-RPC error carrying the cause

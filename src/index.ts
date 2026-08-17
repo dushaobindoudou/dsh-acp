@@ -73,7 +73,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const app = buildAcpApp({
     ctx,
     agents,
-    modelSelection: modelSelectionOf(config, defaultModel.currentSelection()),
+    modelSelection: () => modelSelectionOf(config, defaultModel.currentSelection()),
     offerAlwaysPermissions: config.offerAlwaysPermissions,
     flushOnTurnEnd: config.flushOnTurnEnd,
     table,

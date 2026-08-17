@@ -30,7 +30,7 @@ export interface AcpDeps {
   readonly ctx: CordisContext
   readonly agents: AgentRegistry
   /** Resolved once at boot: config pin or the profile's default selection. */
-  readonly modelSelection: { provider: string; model: string }
+  readonly modelSelection: () => { provider: string; model: string }
   readonly offerAlwaysPermissions: boolean
   readonly flushOnTurnEnd: boolean
   readonly table: AcpSessionTable
@@ -61,7 +61,9 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
         throw new RequestError(-32602, 'session/new requires an absolute cwd')
       }
       const sessionId = `acp-${randomUUID()}`
-      const selection = deps.modelSelection
+      // Evaluated per session: the live default follows config-store
+      // loads and in-GUI model switches instead of a mount-time snapshot.
+      const selection = deps.modelSelection()
       // The entry object exists before the agent: setup listeners close over
       // it and only touch the live fields (lastTurnEnd), never the agent
       // reference, which is filled in synchronously after create resolves.
