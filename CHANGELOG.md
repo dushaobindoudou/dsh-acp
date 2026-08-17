@@ -36,6 +36,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.0] - 2026-08-17
 
+### Published
+
+- `dsh-acp-server@0.1.0` is live on npm (prebuilt; `dsh plugin --profile acp
+  add dsh-acp-server`). Verified end-to-end: registry install -> full ACP
+  conversation -> tool lifecycle -> clean exit, in a throwaway $DSH_HOME.
+
+
 ### Added
 
 - M1 ACP v1 server as a dsh profile bundle (`dsh --profile acp`):
