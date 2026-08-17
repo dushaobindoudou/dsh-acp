@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Web-mounted mode: `dsh plugin --profile web add dsh-acp-server` plus the
+  row-level `inject: [agents, agentDefaultModel, webServer]` (automated by
+  bin/setup-webacp.mjs) serves the GUI and ACP in one process on one port -
+  /acp, /acp/stream, /acp/healthz registered on the shared webServer service;
+  optional `token` config for bearer auth. Zero races: Cordis inject semantics
+  guarantee the shared service exists before the ACP row mounts.
+
+### Added
+
 - `serve` mode: `dsh --profile acp serve [--host] [--port] [--token]` runs a
   long-lived HTTP+SSE ACP endpoint (POST /acp + GET /acp/stream + DELETE,
   Acp-Connection-Id binding, bearer auth, multi-client) following the ACP

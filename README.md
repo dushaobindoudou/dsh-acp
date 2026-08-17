@@ -67,6 +67,25 @@ avoid the authorization entirely with a prebuilt npm package or tarball.
 Verify any time with `dsh --profile acp --dump-config` (a `# == dsh-acp` layer
 should appear).
 
+## Share one port with the Web GUI
+
+The Web GUI and ACP can run in ONE process on ONE port - install into the `web`
+profile and boot it:
+
+```bash
+node bin/setup-webacp.mjs        # or: dsh plugin --profile web add dsh-acp-server
+                                  # + the row-level inject from the script
+dsh --profile webacp             # http://127.0.0.1:3080 = GUI, /acp = ACP
+```
+
+The script clones the `web` profile to `webacp`, installs this bundle with the
+official `dsh plugin` command, and appends the deterministic web-mounted row
+(`inject: [agents, agentDefaultModel, webServer]` - Cordis then guarantees the
+shared `webServer` service exists before the ACP row mounts, so the two never
+race for stdio). ACP registers `/acp`, `/acp/stream`, and `/acp/healthz` on the
+web composition's shared HTTP server via its public `webServer.register` API.
+Set a `token` in the acp-server config to require bearer auth.
+
 ## Remote access (`serve`, like `opencode serve`)
 
 Editors get ACP over stdio, but you can also run a long-lived HTTP+SSE endpoint -

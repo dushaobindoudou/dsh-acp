@@ -24,6 +24,11 @@ export interface Config {
   offerAlwaysPermissions: boolean
   /** Flush session persistence after every completed turn. */
   flushOnTurnEnd: boolean
+  /**
+   * Bearer token required by the HTTP transport (web-mounted mode; the
+   * standalone `serve` mode takes it from its own --token flag).
+   */
+  token?: string
 }
 
 export const Config = z.object({
@@ -32,6 +37,7 @@ export const Config = z.object({
   model: z.string().description('pin the model id for ACP sessions (set together with provider)'),
   offerAlwaysPermissions: z.boolean().default(true).description('offer allow_always / reject_always permission options'),
   flushOnTurnEnd: z.boolean().default(true).description('flush session persistence after every completed turn'),
+  token: z.string().description('bearer token required by the HTTP transport when mounted in a web composition'),
 })
 
 /** Resolve the effective model selection: the pin, or the profile default. */

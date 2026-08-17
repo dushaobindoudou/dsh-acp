@@ -7,6 +7,7 @@
  * cordis.patch.yml and README.md.
  */
 import type { Context } from '@deepseek-ai/cordis'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable, Writable } from 'node:stream'
 import type { AgentConnection } from '@agentclientprotocol/sdk'
 import { buildAcpApp, connectStdio } from './connection.js'
@@ -23,7 +24,7 @@ export type { Config as AcpServerConfig } from './config.js'
 import { SERVE_STARTUP_SERVICE, type ServeOptions } from './serve-startup.js'
 export { SERVE_STARTUP_SERVICE } from './serve-startup.js'
 export type { ServeOptions } from './serve-startup.js'
-import { startServeTransport } from './http-transport.js'
+import { startServeTransport, createAcpRouter } from './http-transport.js'
 
 /** Process seams, overridable from tests (mirrors dsh-headless's `internals`). */
 export const internals: {
@@ -36,6 +37,11 @@ export const internals: {
 
 type AppExit = (code: number) => void
 
+/** The shared HTTP service of a web composition (@deepseek-ai/dsh-host-webserver). */
+interface WebServerLike {
+  register(route: { kind: 'exact' | 'prefix'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => unknown }): () => void
+}
+
 const VERSION = '0.1.0'
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
@@ -47,6 +53,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const agents = ctx.get('agents')
   const defaultModel = ctx.get('agentDefaultModel') as { currentSelection(): { provider: string; model: string } } | undefined
   if (agents === undefined || defaultModel === undefined) return // inject guarantees these; runtime double-check
+  const serveOptions = ctx.get(SERVE_STARTUP_SERVICE) as ServeOptions | undefined
 
   const table = new AcpSessionTable()
   const log = (message: string) => {
@@ -66,6 +73,29 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     version: VERSION,
   })
 
+  // Web-mounted mode: when this plugin loads inside a web composition (the
+  // `webServer` service exists), the ACP HTTP routes ride the SAME process
+  // and port as the GUI - `dsh plugin --profile web add dsh-acp-server`
+  // then serves http://host:3080 (GUI) and /acp (ACP) together. stdio stays
+  // untouched for the web app.
+  if (serveOptions === undefined) {
+    const webServer = ctx.get('webServer') as WebServerLike | undefined
+    if (webServer !== undefined) {
+      const router = createAcpRouter(app, { token: config.token }, log)
+      const dispose = webServer.register({ kind: 'exact', path: '/acp', handler: (req, res) => router.handle(req, res) })
+      const disposeStream = webServer.register({ kind: 'exact', path: '/acp/stream', handler: (req, res) => router.handle(req, res) })
+      const disposeHealth = webServer.register({ kind: 'exact', path: '/acp/healthz', handler: (req, res) => router.handle(req, res) })
+      log('web-mounted: ACP serving on the shared webServer at /acp')
+      ctx.effect(() => () => {
+        dispose()
+        disposeStream()
+        disposeHealth()
+        router.close()
+      })
+      return
+    }
+  }
+
   const stdin = internals.stdin as Readable
   const stdout = internals.stdout as Writable
 
@@ -73,7 +103,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // process becomes a long-lived HTTP+SSE ACP endpoint instead of a stdio
   // child. The publish happens in the serve-startup row, which mounts before
   // this row in cordis.patch.yml.
-  const serveOptions = ctx.get(SERVE_STARTUP_SERVICE) as ServeOptions | undefined
   if (serveOptions !== undefined) {
     const handle = await startServeTransport(app, serveOptions, (message) => {
       log(`serve: ${message}`)

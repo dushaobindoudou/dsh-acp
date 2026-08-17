@@ -1,52 +1,55 @@
 /**
- * Network transport for ACP over HTTP+SSE, following the shape of the ACP
- * "Streamable HTTP & WebSocket Transport" RFD (draft): POST carries
- * client->server JSON-RPC messages, a long-lived SSE GET stream carries all
- * server->client messages, and `Acp-Connection-Id` binds them. Each HTTP
- * connection drives one SDK AgentConnection over in-memory streams, so
- * several remote clients can be attached to one dsh process.
+ * ACP over HTTP+SSE, following the shape of the ACP "Streamable HTTP &
+ * WebSocket Transport" RFD (draft): POST carries client->server JSON-RPC
+ * messages, a long-lived SSE GET stream carries all server->client messages,
+ * and `Acp-Connection-Id` binds them. Each HTTP connection drives one SDK
+ * AgentConnection over in-memory streams.
  *
- *   POST   /acp          one JSON-RPC message per request body
- *                         `initialize` -> 200 + JSON body + Acp-Connection-Id
- *                         everything else (requests AND responses to
- *                         server-initiated requests like
- *                         session/request_permission) -> 202 Accepted
- *   GET    /acp/stream    SSE stream for the connection (header or query)
- *   DELETE /acp           close the connection
- *   GET    /healthz       liveness probe (no auth)
+ * The router below is transport-agnostic. It is served two ways:
+ *  - standalone `serve` mode: its own node:http server (src/index.ts)
+ *  - web-mounted mode: registered onto the shared `webServer` service of a
+ *    web composition, so the GUI and ACP share one process and one port
+ *
+ *   POST   /acp           one JSON-RPC message per request body
+ *                          `initialize` -> 200 + JSON body + Acp-Connection-Id
+ *                          everything else (requests AND responses to
+ *                          server-initiated requests like
+ *                          session/request_permission) -> 202 Accepted
+ *   GET    /acp/stream     SSE stream for the connection (header or query)
+ *   DELETE /acp            close the connection
+ *   GET    /acp/healthz    liveness probe (no auth)
  */
-import { createServer, type Server, type IncomingMessage } from 'node:http'
+import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { ndJsonStream } from '@agentclientprotocol/sdk'
 import type { AgentApp, AgentConnection } from '@agentclientprotocol/sdk'
-import type { ServeOptions } from './serve-startup.js'
 
-export interface ServeHandle {
-  readonly port: number
-  close(): Promise<void>
+export interface AcpHttpOptions {
+  readonly token: string | undefined
 }
 
-interface AcpHttpConnection {
-  readonly id: string
-  readonly conn: AgentConnection
-  receive(message: unknown): void
-  attachStream(res: import('node:http').ServerResponse): void
+export interface AcpRouter {
+  handle(req: IncomingMessage, res: ServerResponse): Promise<void>
   close(): void
 }
 
 const encoder = new TextEncoder()
 
-export function startServeTransport(
-  app: AgentApp,
-  opts: ServeOptions,
-  log: (message: string) => void,
-): Promise<ServeHandle> {
+export function createAcpRouter(app: AgentApp, opts: AcpHttpOptions, log: (message: string) => void): AcpRouter {
   const connections = new Map<string, AcpHttpConnection>()
+
+  interface AcpHttpConnection {
+    readonly id: string
+    readonly conn: AgentConnection
+    receive(message: unknown): void
+    attachStream(res: ServerResponse): void
+    close(): void
+  }
 
   function makeConnection(initializeId: number | string): { connection: AcpHttpConnection; initializeResult: Promise<unknown> } {
     const id = randomUUID()
     let inputController: ReadableStreamDefaultController<Uint8Array> | undefined
-    let sse: import('node:http').ServerResponse | undefined
+    let sse: ServerResponse | undefined
     const pending: string[] = []
     let initializeResolve: ((value: unknown) => void) | undefined
 
@@ -121,18 +124,11 @@ export function startServeTransport(
     return { connection, initializeResult }
   }
 
-  const server: Server = createServer((req, res) => {
-    void handleRequest(req, res).catch((error: unknown) => {
-      log(`http handler failed: ${String(error instanceof Error ? error.message : error)}`)
-      if (!res.writableEnded) res.writeHead(500).end()
-    })
-  })
-
-  async function handleRequest(req: IncomingMessage, res: import('node:http').ServerResponse): Promise<void> {
+  async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const method = req.method ?? 'GET'
 
-    if (url.pathname === '/healthz') {
+    if (method === 'GET' && (url.pathname === '/acp/healthz' || url.pathname === '/healthz')) {
       res.writeHead(200).end('ok')
       return
     }
@@ -145,7 +141,7 @@ export function startServeTransport(
       }
     }
 
-    if (method === 'POST' && (url.pathname === '/acp' || url.pathname === '/')) {
+    if (method === 'POST' && url.pathname === '/acp') {
       const body = await readBody(req)
       const messages = parseMessages(body)
       if (messages.length === 0) {
@@ -203,6 +199,33 @@ export function startServeTransport(
     res.writeHead(404).end('see POST /acp, GET /acp/stream, DELETE /acp')
   }
 
+  return {
+    handle,
+    close() {
+      for (const connection of connections.values()) connection.close()
+      connections.clear()
+    },
+  }
+}
+
+export interface ServeHandle {
+  readonly port: number
+  close(): Promise<void>
+}
+
+/** Standalone `serve` mode: the router on its own node:http server. */
+export function startServeTransport(
+  app: AgentApp,
+  opts: { host: string; port: number; token: string | undefined },
+  log: (message: string) => void,
+): Promise<ServeHandle> {
+  const router = createAcpRouter(app, { token: opts.token }, log)
+  const server: Server = createServer((req, res) => {
+    void router.handle(req, res).catch((error: unknown) => {
+      log(`http handler failed: ${String(error instanceof Error ? error.message : error)}`)
+      if (!res.writableEnded) res.writeHead(500).end()
+    })
+  })
   return new Promise<ServeHandle>((resolve, reject) => {
     server.once('error', reject)
     server.listen(opts.port, opts.host, () => {
@@ -213,8 +236,7 @@ export function startServeTransport(
       resolve({
         port,
         async close() {
-          for (const connection of connections.values()) connection.close()
-          connections.clear()
+          router.close()
           await new Promise<void>((done) => server.close(() => done()))
         },
       })

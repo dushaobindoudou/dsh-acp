@@ -57,6 +57,23 @@ allowBuilds:
 
 然后重新执行 `add`。建议锁定 commit（`github:dushaobindoudou/dsh-acp#<sha>`)；或直接用预构建的 npm 包 / tarball，完全绕开授权。随时可用 `dsh --profile acp --dump-config` 验证（应出现 `# == dsh-acp` 层）。
 
+## 与 Web GUI 共用一个端口
+
+Web GUI 和 ACP 可以同进程、同端口--装进 `web` profile 再启动即可：
+
+```bash
+node bin/setup-webacp.mjs        # 或手动: dsh plugin --profile web add dsh-acp-server
+                                  # 再按脚本内容给 acp-server 行加行级 inject
+dsh --profile webacp             # http://127.0.0.1:3080 = GUI，/acp = ACP
+```
+
+脚本会把 `web` profile 克隆为 `webacp`，用官方 `dsh plugin` 命令安装本 bundle，
+并追加确定性的 web 挂载行（`inject: [agents, agentDefaultModel, webServer]`--
+Cordis 保证共享的 `webServer` 服务先就绪再挂 ACP 行，二者不会争抢 stdio）。
+ACP 通过 web 组合公开的 `webServer.register` API 把 `/acp`、`/acp/stream`、
+`/acp/healthz` 注册到同一个 HTTP 服务上。在 acp-server 配置里设 `token` 可启用
+Bearer 鉴权。
+
 ## 远程接入（`serve`，类似 `opencode serve`）
 
 编辑器走 stdio；同时你也可以起一个常驻 HTTP+SSE 端点--用于远程机器、共享 agent 或

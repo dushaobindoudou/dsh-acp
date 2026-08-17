@@ -1,6 +1,6 @@
 {
   "name": "dsh-acp-server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Agent Client Protocol (ACP) server plugin for the DeepSeek Harness (dsh) — drive dsh agents from Zed and any ACP client",
   "type": "module",
   "license": "MIT",
@@ -51,7 +51,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "test": "npm run build && node --test \"test/unit/*.test.mjs\"",
-    "test:e2e": "node test/e2e/e2e.test.mjs && node test/e2e/serve.test.mjs",
+    "test:e2e": "node test/e2e/e2e.test.mjs && node test/e2e/serve.test.mjs && node test/e2e/webacp.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "npm run clean && npm run build",
     "prepare": "npm run build"
