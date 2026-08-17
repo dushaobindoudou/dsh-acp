@@ -84,6 +84,30 @@ Third-party ACP clients that work today:
 | [obsidian-agent-client](https://github.com/RAIT-09/obsidian-agent-client) | Obsidian | plugin settings |
 | [ACP-inspector](https://github.com/venikman/ACP-inspector) | conformance/debug | validates wire traffic |
 
+## Configuration
+
+All knobs have schema defaults, so the shipped bundle row carries no config;
+override only the keys you want in your own profile layer
+(`$DSH_HOME/profiles/acp/cordis.patch.yml`):
+
+```yaml
+- id: acp-server
+  config:
+    agentName: my-dsh            # initialize.agentInfo.name shown to clients
+    provider: deepseek           # pin the model for ACP sessions
+    model: reasoner              # (provider and model must be set together)
+    offerAlwaysPermissions: false # hide allow_always/reject_always (M1 maps
+                                  # "always" grants to one-shot decisions)
+    flushOnTurnEnd: true         # flush session persistence after each turn
+```
+
+Behavior follows the harness config conventions: the schema validates at
+plugin load (wrong types or a half-set provider/model pin fail loudly with
+the exact key), missing keys fall back to defaults (a patch layer replaces
+the whole config value, the schema refills the rest), and unset
+provider/model follows the profile's `agent-default-model`. Config is read
+when the process boots - editors spawn one per session.
+
 ## Use with Zed
 
 Zed → Settings → `agent_servers`:

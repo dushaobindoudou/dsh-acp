@@ -28,9 +28,13 @@ import { promptToContent, stopReasonOf } from './translate.js'
 export interface AcpDeps {
   readonly ctx: CordisContext
   readonly agents: AgentRegistry
-  readonly defaultModel: { currentSelection(): { provider: string; model: string } }
+  /** Resolved once at boot: config pin or the profile's default selection. */
+  readonly modelSelection: { provider: string; model: string }
+  readonly offerAlwaysPermissions: boolean
+  readonly flushOnTurnEnd: boolean
   readonly table: AcpSessionTable
   readonly log: (message: string) => void
+  readonly agentName: string
   readonly version: string
 }
 
@@ -43,7 +47,7 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
   return agent({ name: 'dsh-acp' })
     .onRequest('initialize', async () => ({
       protocolVersion: PROTOCOL_VERSION,
-      agentInfo: { name: 'dsh', version: deps.version },
+      agentInfo: { name: deps.agentName, version: deps.version },
       agentCapabilities: {
         loadSession: false,
         promptCapabilities: {},
@@ -56,7 +60,7 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
         throw new RequestError(-32602, 'session/new requires an absolute cwd')
       }
       const sessionId = `acp-${randomUUID()}`
-      const selection = deps.defaultModel.currentSelection()
+      const selection = deps.modelSelection
       // The entry object exists before the agent: setup listeners close over
       // it and only touch the live fields (lastTurnEnd), never the agent
       // reference, which is filled in synchronously after create resolves.
@@ -76,7 +80,7 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
         setup: (agentCtx) => {
           installModelSelection(agentCtx, { current: selection, assembled: undefined })
           attachEventBridge(agentCtx, entry, emit)
-          attachPermBridge(agentCtx, sessionId, entry, context, log)
+          attachPermBridge(agentCtx, sessionId, entry, deps.offerAlwaysPermissions, context, log)
         },
       })
       entry.agent = created
@@ -98,7 +102,7 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
         }))
         await entry.agent.whenIdle()
         const sessions = deps.ctx.get('sessions')
-        if (sessions !== undefined) {
+        if (deps.flushOnTurnEnd && sessions !== undefined) {
           try {
             await sessions.flush(entry.agent.session)
           } catch {

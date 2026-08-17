@@ -1,6 +1,8 @@
-# Test overlay for the e2e run: mounts the deterministic mock LLM provider
-# and points the default model at it. Applied with `--patch` over the acp
-# profile; never part of the shipped bundle.
+# Test overlay for the e2e run: mounts the deterministic mock LLM provider,
+# points the default model at it, and overrides the acp-server row's config
+# (proving user-layer config overrides flow through the schema into the wire
+# response). Applied with `--patch` over the acp profile; never part of the
+# shipped bundle.
 
 - id: agent-default-model
   config:
@@ -9,6 +11,11 @@
 
 - id: session-title-llm
   disabled: true
+
+- id: acp-server
+  config:
+    agentName: dsh-e2e
+    offerAlwaysPermissions: false
 
 - insert:
     - id: mock-llm

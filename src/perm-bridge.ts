@@ -22,30 +22,44 @@ interface ApprovalRequestLike {
   readonly signal?: AbortSignal
 }
 
-const PERMISSION_OPTIONS: PermissionOption[] = [
+const ALL_PERMISSION_OPTIONS: PermissionOption[] = [
   { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
   { optionId: 'allow-always', name: 'Always allow', kind: 'allow_always' },
   { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
   { optionId: 'reject-always', name: 'Always reject', kind: 'reject_always' },
 ]
 
+/**
+ * Options offered to the client. `allow_always` implies remembered rules,
+ * which M1 does not implement (grants map to one-shot decisions), so the
+ * config can hide the "always" options.
+ */
+function permissionOptions(offerAlways: boolean): PermissionOption[] {
+  return offerAlways
+    ? ALL_PERMISSION_OPTIONS
+    : ALL_PERMISSION_OPTIONS.filter((option) => option.kind === 'allow_once' || option.kind === 'reject_once')
+}
+
 /** Register the agent-scoped approval answerer for one ACP session. */
 export function attachPermBridge(
   agentCtx: Context,
   sessionId: string,
   entry: AcpSessionEntry,
+  offerAlways: boolean,
   context: () => AgentContext | undefined,
   log: (message: string) => void,
 ): void {
+  const options = permissionOptions(offerAlways)
   agentCtx.on('approval/request', (req: ApprovalRequestLike, next: () => Promise<ApprovalOutcome>) => {
     if (String(req.agent.id) !== sessionId) return next()
-    return answerViaAcp(req, entry, context, log)
+    return answerViaAcp(req, entry, options, context, log)
   })
 }
 
 async function answerViaAcp(
   req: ApprovalRequestLike,
   entry: AcpSessionEntry,
+  options: PermissionOption[],
   context: () => AgentContext | undefined,
   log: (message: string) => void,
 ): Promise<ApprovalOutcome> {
@@ -75,7 +89,7 @@ async function answerViaAcp(
       .request<RequestPermissionResponse>('session/request_permission', {
         sessionId: entry.sessionId,
         toolCall: asked,
-        options: PERMISSION_OPTIONS,
+        options,
       })
       .then((response) => {
         const outcome = response.outcome
@@ -83,7 +97,7 @@ async function answerViaAcp(
           finish('cancelled')
           return
         }
-        const chosen = PERMISSION_OPTIONS.find((option) => option.optionId === outcome.optionId)
+        const chosen = options.find((option) => option.optionId === outcome.optionId)
         if (chosen === undefined) {
           finish('unavailable')
           return

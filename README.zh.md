@@ -74,6 +74,23 @@ node bin/acp-chat.mjs            # 启动 `dsh --profile acp` 并进入对话
 | [obsidian-agent-client](https://github.com/RAIT-09/obsidian-agent-client) | Obsidian | 插件设置 |
 | [ACP-inspector](https://github.com/venikman/ACP-inspector) | 一致性/调试 | 校验线上流量 |
 
+## 配置
+
+所有配置项都有 schema 默认值，随包分发的行不带 config；在你自己的 profile 层（`$DSH_HOME/profiles/acp/cordis.patch.yml`）只覆盖想改的键：
+
+```yaml
+- id: acp-server
+  config:
+    agentName: my-dsh            # 报告给客户端的 initialize.agentInfo.name
+    provider: deepseek           # 为 ACP 会话钉住模型
+    model: reasoner              #（provider 和 model 必须成对设置）
+    offerAlwaysPermissions: false # 隐藏 allow_always/reject_always（M1 把
+                                  # "always" 授权按一次性决策处理）
+    flushOnTurnEnd: true         # 每 turn 结束后 flush 会话持久化
+```
+
+行为遵循 harness 配置约定：schema 在插件加载时校验（类型错误或 provider/model 只给一半会带上确切的键名响亮失败），缺省键回落默认值（patch 层会整块替换 config 值，schema 负责补齐其余），不设 provider/model 则跟随 profile 的 `agent-default-model`。配置在进程启动时读取--编辑器按会话拉起进程。
+
 ## 在 Zed 中使用
 
 Zed → 设置 → `agent_servers`：

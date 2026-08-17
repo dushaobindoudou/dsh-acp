@@ -120,8 +120,10 @@ const updatesFor = (sessionId) =>
 try {
   const init = await withTimeout(send('initialize', { protocolVersion: 1, clientCapabilities: {} }), 60_000, 'initialize')
   assert.equal(init.protocolVersion, 1)
-  assert.equal(init.agentInfo.name, 'dsh')
-  PASS('initialize handshake')
+  // agentName comes from the overlay's acp-server config override -> proves
+  // user-layer config overrides flow through the schema onto the wire.
+  assert.equal(init.agentInfo.name, 'dsh-e2e')
+  PASS('initialize handshake (config override: agentName=dsh-e2e)')
 
   const session = await withTimeout(send('session/new', { cwd: project, mcpServers: [] }), 120_000, 'session/new')
   const sessionId = session.sessionId

@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Plugin configuration (Schemastery schema, validated at load, all defaults
+  in schema): `agentName` (initialize.agentInfo.name), `provider`/`model`
+  pin for ACP sessions (both-or-neither, else follows the profile default),
+  `offerAlwaysPermissions` (hide allow_always/reject_always, which M1 maps
+  to one-shot decisions), `flushOnTurnEnd`. Users override keys in their
+  own profile patch layer; the e2e run proves the override reaches the wire
+  (`initialize.agentInfo.name`).
+
 ### Changed
 
 - Install path now uses the official `dsh plugin --profile acp add <pkg>`

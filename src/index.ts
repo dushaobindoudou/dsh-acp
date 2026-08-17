@@ -17,7 +17,7 @@ export const name = 'acp-server'
 /** Hard dependencies: the agent registry and the default-model selection. */
 export const inject = ['agents', 'agentDefaultModel']
 
-import { Config } from './config.js'
+import { Config, modelSelectionOf, validateModelPin } from './config.js'
 export { Config }
 export type { Config as AcpServerConfig } from './config.js'
 
@@ -34,7 +34,8 @@ type AppExit = (code: number) => void
 
 const VERSION = '0.1.0'
 
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: Config): void {
+  validateModelPin(config) // both-or-neither, fails the plugin loudly at load
   const exit = ctx.get('appExit') as AppExit | undefined
   if (exit === undefined) {
     throw new Error('acp-server: the launcher must provide ctx.appExit before the tree mounts (boot via `dsh --profile acp`)')
@@ -52,9 +53,12 @@ export function apply(ctx: Context): void {
   const app = buildAcpApp({
     ctx,
     agents,
-    defaultModel,
+    modelSelection: modelSelectionOf(config, defaultModel.currentSelection()),
+    offerAlwaysPermissions: config.offerAlwaysPermissions,
+    flushOnTurnEnd: config.flushOnTurnEnd,
     table,
     log,
+    agentName: config.agentName,
     version: VERSION,
   })
 
