@@ -57,6 +57,25 @@ allowBuilds:
 
 然后重新执行 `add`。建议锁定 commit（`github:dushaobindoudou/dsh-acp#<sha>`)；或直接用预构建的 npm 包 / tarball，完全绕开授权。随时可用 `dsh --profile acp --dump-config` 验证（应出现 `# == dsh-acp` 层）。
 
+## 最终形态：两条命令
+
+```bash
+dsh-acp-server                    # 1) 单独启动：stdio 接编辑器，`serve` 子命令开远程
+dsh web                           # 2) 同时启动：GUI 与 ACP 同端口
+```
+
+1. **`dsh-acp-server`**（`npm i -g dsh-acp-server` 后全局可用，或 npx 直接跑）
+   即 `dsh --profile acp` 的单命令形态，launcher 参数全部透传
+   （`serve --port 7800`、`--patch extra.yml`）。DSH home 里还没有 `acp`
+   profile 时，首次运行会用官方 `dsh plugin` 命令自动引导--引导输出全部走
+   stderr，编辑器读到的 stdout 永远只有 ACP 帧。
+2. **`dsh web`**--往 web profile 装一次（见下节），之后每次 web 启动都同时
+   服务 GUI 和 `/acp`。
+
+为什么是独立命令而不是字面的 `dsh acp-server`：dsh launcher 的应用子命令
+（`web`、`plugin`）是写死的，且在任何插件加载前就解析 argv，bundle 无法注册
+新子命令；这个包装器就是同形态的单命令。
+
 ## 与 Web GUI 共用一个端口（`dsh web` + ACP）
 
 往 `web` profile 装一次，之后每次 `dsh web` 都是同进程同端口同时服务 GUI 和 ACP：

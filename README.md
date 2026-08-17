@@ -67,6 +67,26 @@ avoid the authorization entirely with a prebuilt npm package or tarball.
 Verify any time with `dsh --profile acp --dump-config` (a `# == dsh-acp` layer
 should appear).
 
+## The two final forms
+
+```bash
+dsh-acp-server                    # 1) standalone: ACP on stdio (editors) or `serve` for remote
+dsh web                           # 2) together: the GUI and ACP on one port
+```
+
+1. **`dsh-acp-server`** (after `npm i -g dsh-acp-server`, or via `npx`) boots
+   `dsh --profile acp` with the current stdio; every launcher flag passes
+   through (`serve --port 7800`, `--patch extra.yml`). First use in a DSH home
+   bootstraps the `acp` profile with the official `dsh plugin` command -
+   bootstrap output goes to stderr, so an editor's stdout only ever sees ACP
+   frames.
+2. **`dsh web`** - install once into the web profile (below) and every web
+   boot serves the GUI and `/acp` on one port.
+
+Why a bin instead of the literal `dsh acp-server`: the dsh launcher hardcodes
+its app subcommands (`web`, `plugin`) and parses argv before any plugin loads,
+so a bundle cannot register one; the wrapper is the same single-command shape.
+
 ## Share one port with the Web GUI (`dsh web` + ACP)
 
 Install into the `web` profile once, and every plain `dsh web` boot serves the

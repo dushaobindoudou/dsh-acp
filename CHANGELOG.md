@@ -8,6 +8,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The `dsh-acp-server` bin is the standalone single command: boots
+  `dsh --profile acp` with full flag passthrough (`serve`, `--patch`, ...),
+  and auto-bootstraps the acp profile on first use in a DSH home with the
+  official `dsh plugin` command (bootstrap chatter on stderr only - editor
+  stdout stays pure ACP). Bare `dsh acp-server` is not possible from a
+  bundle: the launcher hardcodes its `web`/`plugin` subcommands before any
+  plugin parses argv.
+
+### Added
+
 - `dsh web` auto-starts ACP: setup-webacp.mjs now installs INTO the web
   profile by default (--clone keeps the original), so a plain `dsh web` boot
   serves the GUI and /acp on one port.
