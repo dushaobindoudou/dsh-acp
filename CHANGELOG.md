@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A turn that ends in `error` (transport, auth, quota - e.g. a broken
+  provider baseURL) no longer resolves `session/prompt` as a silent empty
+  `end_turn`: the request now fails with a JSON-RPC error carrying the cause
+  (`agent turn failed: ...`) and the failure is logged to stderr. Found
+  against a real misconfigured provider (`baseURL: "11111"`).
+
 ### Added
 
 - The `dsh-acp-server` bin is the standalone single command: boots

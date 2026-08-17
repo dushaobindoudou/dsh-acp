@@ -20,6 +20,7 @@ import type { AgentRegistry } from '@deepseek-ai/dsh-agent'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type { TurnEndReason } from '@deepseek-ai/dsh-session'
 import type { AcpSessionTable, AcpSessionEntry } from './table.js'
 import { attachEventBridge, makeEmitter } from './event-bridge.js'
 import { attachPermBridge } from './perm-bridge.js'
@@ -101,6 +102,21 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
           source: { kind: 'user' },
         }))
         await entry.agent.whenIdle()
+        // Re-read through a widening cast: the `= undefined` reset above
+        // narrows the property across the await in control-flow analysis
+        // (and would narrow any local initialized from it straight to
+        // `undefined`, making the error check below `never`).
+        const turnEnd = (entry as { lastTurnEnd: TurnEndReason | undefined }).lastTurnEnd
+        if (turnEnd?.kind === 'error') {
+          // Infrastructure failures (transport, auth, quota) can end a turn
+          // without a single message chunk; resolving normally would look
+          // like an empty end_turn to the client. Fail the request so the
+          // client surfaces the cause (ACP reports turn errors through the
+          // response, not through stopReason).
+          const failure = turnEnd.error
+          deps.log(`turn failed: ${failure?.message ?? 'unknown error'}`)
+          throw new RequestError(-32603, `agent turn failed: ${failure?.message ?? 'unknown error'}`, failure)
+        }
         const sessions = deps.ctx.get('sessions')
         if (deps.flushOnTurnEnd && sessions !== undefined) {
           try {
