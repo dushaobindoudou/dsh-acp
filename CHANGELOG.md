@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Declared the full dsh dependency closure (cordis, dsh-attachment/brand/
+  invariants/scope/system-prompt/timeout/typert-protocol, zod) as regular
+  dependencies, matching how other published dsh bundles ship their trees.
+  The official profile template pins `autoInstallPeers: false`, so a
+  partial closure produced a wall of "missing peer" warnings on
+  `dsh plugin add`. Installs are now warning-free with every peer resolved.
+
 ### Changed
 
 - npm package name is `dsh-acp-server` (the plain `dsh-acp` name on npm

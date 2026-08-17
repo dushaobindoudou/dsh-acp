@@ -1,6 +1,6 @@
 {
   "name": "dsh-acp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agent Client Protocol (ACP) server plugin for the DeepSeek Harness (dsh) — drive dsh agents from Zed and any ACP client",
   "type": "module",
   "license": "MIT",
@@ -57,10 +57,19 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.3.0",
+    "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-attachment": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-brand": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-scope": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-session": "^0.1.0-rc.6",
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-timeout": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
