@@ -49,13 +49,22 @@ if (cloneName !== undefined) {
 
 // Official install (initializes the profile from its shipped template on
 // first use, adds the dependency, appends the bundle to the manifest).
-const install = spawnSync('dsh', ['plugin', '--profile', profile, 'add', pkg], {
-  stdio: 'inherit',
-  env: { ...env, DSH_HOME: home },
-})
-if (install.status !== 0) {
-  process.stderr.write(`dsh-acp setup-webacp: \`dsh plugin --profile ${profile} add ${pkg}\` failed\n`)
-  exit(install.status ?? 1)
+// Skipped when the bundle is already in the manifest - a re-add with a bare
+// registry spec can fail on stale npm metadata right after a release and
+// would otherwise abort the setup before the row is written.
+const manifestPath = join(profileDir, 'package.json')
+const alreadyInstalled =
+  existsSync(manifestPath) &&
+  (JSON.parse(readFileSync(manifestPath, 'utf8'))?.dsh?.profile?.bundles ?? []).includes('dsh-acp-server')
+if (!alreadyInstalled) {
+  const install = spawnSync('dsh', ['plugin', '--profile', profile, 'add', pkg], {
+    stdio: 'inherit',
+    env: { ...env, DSH_HOME: home },
+  })
+  if (install.status !== 0) {
+    process.stderr.write(`dsh-acp setup-webacp: \`dsh plugin --profile ${profile} add ${pkg}\` failed\n`)
+    exit(install.status ?? 1)
+  }
 }
 
 // Deterministic web-mounted mode: the row waits for the shared webServer.
