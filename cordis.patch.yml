@@ -1,0 +1,21 @@
+# The dsh-acp bundle patch: an ACP stdio server directly over dsh-base.
+#
+# This package is a dsh *profile bundle*: the profile composer reads this file
+# through the `dsh.bundle.patch` manifest field in package.json and applies it
+# as a layer over the empty profile root (dsh-base is the layer before it).
+#
+# The layer mirrors dsh-headless's shape: module-reload HMR stays off (it
+# would print to stdout and corrupt the ACP stream), the coding persona is
+# stated once, and the acp-server row mounts this package.
+
+- id: hmr
+  disabled: true
+
+- id: system-prompt
+  config:
+    persona: >-
+      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+
+- insert:
+    - id: acp-server
+      name: 'dsh-acp'

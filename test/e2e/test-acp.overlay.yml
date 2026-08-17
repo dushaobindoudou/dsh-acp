@@ -1,0 +1,15 @@
+# Test overlay for the e2e run: mounts the deterministic mock LLM provider
+# and points the default model at it. Applied with `--patch` over the acp
+# profile; never part of the shipped bundle.
+
+- id: agent-default-model
+  config:
+    provider: mock
+    model: mock-1
+
+- id: session-title-llm
+  disabled: true
+
+- insert:
+    - id: mock-llm
+      name: 'dsh-acp/test/mock-llm'

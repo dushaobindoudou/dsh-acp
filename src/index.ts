@@ -1,0 +1,93 @@
+/**
+ * dsh-acp: an Agent Client Protocol (ACP) v1 server as a dsh profile bundle.
+ *
+ * The plugin owns the process stdio: ACP NDJSON JSON-RPC on stdin/stdout,
+ * logs on stderr, no other writer may touch stdout. It rides directly over
+ * `dsh-base` (agents, sessions, persistence, approval, tools) - see
+ * cordis.patch.yml and README.md.
+ */
+import type { Context } from '@deepseek-ai/cordis'
+import { Readable, Writable } from 'node:stream'
+import type { AgentConnection } from '@agentclientprotocol/sdk'
+import { buildAcpApp, connectStdio } from './connection.js'
+import { AcpSessionTable } from './table.js'
+
+export const name = 'acp-server'
+
+/** Hard dependencies: the agent registry and the default-model selection. */
+export const inject = ['agents', 'agentDefaultModel']
+
+import { Config } from './config.js'
+export { Config }
+export type { Config as AcpServerConfig } from './config.js'
+
+/** Process seams, overridable from tests (mirrors dsh-headless's `internals`). */
+export const internals: {
+  stdin: NodeJS.ReadableStream
+  stdout: NodeJS.WritableStream
+} = {
+  stdin: process.stdin,
+  stdout: process.stdout,
+}
+
+type AppExit = (code: number) => void
+
+const VERSION = '0.1.0'
+
+export function apply(ctx: Context): void {
+  const exit = ctx.get('appExit') as AppExit | undefined
+  if (exit === undefined) {
+    throw new Error('acp-server: the launcher must provide ctx.appExit before the tree mounts (boot via `dsh --profile acp`)')
+  }
+  const agents = ctx.get('agents')
+  const defaultModel = ctx.get('agentDefaultModel') as { currentSelection(): { provider: string; model: string } } | undefined
+  if (agents === undefined || defaultModel === undefined) return // inject guarantees these; runtime double-check
+
+  const table = new AcpSessionTable()
+  const log = (message: string) => {
+    // Logs go to stderr only; stdout is reserved for ACP frames.
+    process.stderr.write(`dsh-acp: ${message}\n`)
+  }
+
+  const app = buildAcpApp({
+    ctx,
+    agents,
+    defaultModel,
+    table,
+    log,
+    version: VERSION,
+  })
+
+  const stdin = internals.stdin as Readable
+  const stdout = internals.stdout as Writable
+  const connection: AgentConnection = connectStdio(
+    app,
+    Readable.toWeb(stdin) as unknown as ReadableStream<Uint8Array>,
+    Writable.toWeb(stdout) as unknown as WritableStream<Uint8Array>,
+  )
+
+  let closed = false
+  const shutdown = (code: number) => {
+    if (closed) return
+    closed = true
+    connection.close()
+    void table.disposeAll().finally(() => exit(code))
+  }
+
+  ctx.effect(() => {
+    // Plugin unload (profile teardown) takes the connection down with it.
+    return () => shutdown(0)
+  })
+
+  stdin.on('end', () => shutdown(0))
+  stdin.on('close', () => shutdown(0))
+  stdin.on('error', (error) => {
+    log(`stdin error: ${String(error)}`)
+    shutdown(1)
+  })
+  process.on('SIGPIPE', () => {
+    // The client went away; stdout writes failing are expected then.
+  })
+}
+
+export default { name, inject, Config, apply, internals }
