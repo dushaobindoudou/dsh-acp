@@ -1,0 +1,360 @@
+<!doctype html>
+<!-- The built-in ACP web client, served by `dsh --profile acp serve` at GET /.
+     One file, zero dependencies: initialize -> SSE stream -> session/new ->
+     chat with streaming, thoughts, tool cards, plans, permission modals.
+     It exists to prove the ACP surface can drive a complete chat UI - and to
+     give `serve` a self-contained client out of the box. -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh · ACP</title>
+<style>
+  :root {
+    --bg: #fafafa; --panel: #ffffff; --ink: #1a1a1a; --dim: #6b7280;
+    --line: #e5e7eb; --accent: #2563eb; --ok: #16a34a; --warn: #d97706; --err: #dc2626;
+    --user-bg: #2563eb; --user-ink: #fff; --agent-bg: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1115; --panel:#171a21; --ink:#e6e8ec; --dim:#8b93a1; --line:#262b36;
+            --agent-bg:#171a21; }
+  }
+  * { box-sizing: border-box }
+  html, body { height: 100% }
+  body { margin: 0; font: 14px/1.55 ui-sans-serif, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--ink); display: flex; flex-direction: column }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+           background: var(--panel); border-bottom: 1px solid var(--line) }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn) }
+  header .dot.on { background: var(--ok) }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600 }
+  header .sep { flex: 1 }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel);
+           color: var(--ink); border-radius: 8px; padding: 6px 12px; cursor: pointer }
+  button:hover { border-color: var(--accent); color: var(--accent) }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff }
+  main { flex: 1; overflow-y: auto; padding: 18px max(16px, calc(50% - 420px)) }
+  .msg { max-width: 840px; margin: 0 auto 14px; display: flex; gap: 10px }
+  .msg .who { flex: 0 0 44px; height: 44px; border-radius: 10px; display: flex;
+              align-items: center; justify-content: center; font-weight: 700; font-size: 13px }
+  .msg.user .who { background: var(--user-bg); color: var(--user-ink) }
+  .msg.agent .who { background: var(--agent-bg); border: 1px solid var(--line) }
+  .msg .body { flex: 1; min-width: 0 }
+  .body .bubble { background: var(--agent-bg); border: 1px solid var(--line);
+                  border-radius: 10px; padding: 10px 14px; white-space: pre-wrap;
+                  word-break: break-word }
+  .msg.user .bubble { background: var(--user-bg); color: var(--user-ink); border: none }
+  details.thought { max-width: 840px; margin: 0 auto 10px; color: var(--dim); font-size: 13px }
+  details.thought summary { cursor: pointer; user-select: none }
+  details.thought .txt { white-space: pre-wrap; border-left: 2px solid var(--line);
+                         margin: 6px 0 0 4px; padding-left: 10px }
+  .card { max-width: 840px; margin: 0 auto 10px; border: 1px solid var(--line);
+          border-radius: 10px; padding: 8px 12px; font-size: 13px; background: var(--panel) }
+  .card .row { display: flex; gap: 8px; align-items: baseline }
+  .card .mark { font-weight: 700 }
+  .card.pending .mark { color: var(--dim) }
+  .card.in_progress .mark { color: var(--warn) }
+  .card.completed .mark { color: var(--ok) }
+  .card.failed .mark { color: var(--err) }
+  .card .out { color: var(--dim); white-space: pre-wrap; margin-top: 4px;
+               max-height: 200px; overflow-y: auto }
+  .card.plan ol { margin: 6px 0 2px; padding-left: 20px }
+  .card.plan .done { color: var(--dim); text-decoration: line-through }
+  .card.plan .doing { color: var(--warn); font-weight: 600 }
+  .meta { max-width: 840px; margin: 0 auto; color: var(--dim); font-size: 12px }
+  .meta.err { color: var(--err) }
+  footer { display: flex; gap: 8px; padding: 12px max(16px, calc(50% - 420px)) 16px;
+           background: var(--bg) }
+  footer textarea { flex: 1; resize: none; height: 46px; max-height: 160px; padding: 12px;
+                    border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+                    color: var(--ink); font: inherit; outline: none }
+  footer textarea:focus { border-color: var(--accent) }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+           color: var(--ink); padding: 18px; max-width: 480px; width: 92vw }
+  dialog::backdrop { background: rgba(0,0,0,.45) }
+  dialog h3 { margin: 0 0 6px; font-size: 15px }
+  dialog .tool { font-size: 13px; color: var(--dim); margin-bottom: 12px; word-break: break-all }
+  dialog .opts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end }
+  #banner { max-width: 840px; margin: 0 auto; padding: 2px 0; color: var(--dim); font-size: 12px }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1 id="title">dsh · ACP</h1>
+  <span class="sep"></span>
+  <button id="new">新会话</button>
+  <button id="stop" hidden>停止</button>
+</header>
+<main id="main"><div id="banner">connecting…</div></main>
+<footer>
+  <textarea id="input" placeholder="给 dsh 发消息… (Enter 发送 / Shift+Enter 换行)" autofocus></textarea>
+  <button class="primary" id="send">发送</button>
+</footer>
+<dialog id="perm">
+  <h3>需要授权</h3>
+  <div class="tool" id="permTool"></div>
+  <div class="opts" id="permOpts"></div>
+</dialog>
+<script data-acp-webui>
+'use strict'
+const $ = (id) => document.getElementById(id)
+const main = $('main'), input = $('input'), banner = $('banner')
+
+let connectionId = null
+let sessionId = null
+let nextId = 100
+const pending = new Map()          // JSON-RPC id -> {resolve, reject}
+let busy = false
+
+let agentBubble = null             // current streaming assistant bubble
+let thoughtBox = null              // current streaming <details>
+const toolCards = new Map()        // toolCallId -> {card, out}
+
+// ── transport ──────────────────────────────────────────────────────────────
+async function post(body) {
+  const response = await fetch('/acp', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'acp-connection-id': connectionId ?? '' },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok && response.status !== 202) throw new Error(`HTTP ${response.status}`)
+  return response
+}
+
+function request(method, params) {
+  return new Promise((resolve, reject) => {
+    const id = nextId++
+    pending.set(id, { resolve, reject })
+    post({ jsonrpc: '2.0', id, method, params }).catch(reject)
+  })
+}
+
+function openStream() {
+  const es = new EventSource(`/acp/stream?connection=${encodeURIComponent(connectionId)}`)
+  es.onmessage = (event) => { dispatch(JSON.parse(event.data)) }
+  es.onerror = () => { setStatus(false); banner.textContent = 'SSE 连接中断，请检查服务' }
+}
+
+function setStatus(on, text) {
+  $('dot').classList.toggle('on', on)
+  if (text) banner.textContent = text
+}
+
+// ── JSON-RPC dispatch ──────────────────────────────────────────────────────
+function dispatch(message) {
+  // Server-initiated requests carry a method AND an id; check the method
+  // first so a server id colliding with a local pending id cannot swallow
+  // a permission request.
+  if (message.method !== undefined) {
+    if (message.method === 'session/update') return onUpdate(message.params ?? {})
+    if (message.method === 'session/request_permission') return onPermission(message)
+    return
+  }
+  if (message.id !== undefined && pending.has(message.id)) {
+    const { resolve, reject } = pending.get(message.id)
+    pending.delete(message.id)
+    if (message.error !== undefined) {
+      const error = new Error(message.error.message ?? 'JSON-RPC error')
+      error.data = message.error.data
+      reject(error)
+    } else resolve(message.result)
+  }
+}
+
+// ── session updates -> UI ──────────────────────────────────────────────────
+function onUpdate({ sessionId: sid, update }) {
+  if (sid !== sessionId || update === undefined) return
+  switch (update.sessionUpdate) {
+    case 'agent_message_chunk': {
+      const text = update.content?.type === 'text' ? update.content.text : ''
+      if (agentBubble === null) {
+        const row = document.createElement('div')
+        row.className = 'msg agent'
+        row.innerHTML = '<div class="who">dsh</div><div class="body"><div class="bubble"></div></div>'
+        main.appendChild(row)
+        agentBubble = row.querySelector('.bubble')
+        main.scrollTop = main.scrollHeight
+      }
+      agentBubble.textContent += text
+      main.scrollTop = main.scrollHeight
+      break
+    }
+    case 'agent_thought_chunk': {
+      const text = update.content?.type === 'text' ? update.content.text : ''
+      if (thoughtBox === null) {
+        thoughtBox = document.createElement('details')
+        thoughtBox.className = 'thought'
+        thoughtBox.innerHTML = '<summary>思考中…</summary><div class="txt"></div>'
+        main.appendChild(thoughtBox)
+      }
+      thoughtBox.querySelector('.txt').textContent += text
+      break
+    }
+    case 'tool_call': {
+      closeStreams()
+      const card = document.createElement('div')
+      card.className = 'card pending'
+      card.innerHTML =
+        `<div class="row"><span class="mark">⚙</span>` +
+        `<span class="name"></span><span class="kind" style="color:var(--dim)"></span></div>` +
+        `<div class="out" hidden></div>`
+      card.querySelector('.name').textContent = update.title ?? update.toolCallId
+      card.querySelector('.kind').textContent = update.kind ? ` · ${update.kind}` : ''
+      main.appendChild(card)
+      toolCards.set(String(update.toolCallId), { card, out: card.querySelector('.out') })
+      main.scrollTop = main.scrollHeight
+      break
+    }
+    case 'tool_call_update': {
+      const entry = toolCards.get(String(update.toolCallId))
+      if (entry === undefined) return
+      if (update.status !== undefined) entry.card.className = `card ${update.status}`
+      if (update.title !== undefined) entry.card.querySelector('.name').textContent = update.title
+      const text = (update.content ?? [])
+        .filter((block) => block.type === 'content' && block.content?.type === 'text')
+        .map((block) => block.content.text).join('\n')
+      if (text !== '') { entry.out.hidden = false; entry.out.textContent = text }
+      break
+    }
+    case 'plan': {
+      closeStreams()
+      let card = document.querySelector('.card.plan')
+      if (card === null) {
+        card = document.createElement('div')
+        card.className = 'card plan'
+        card.innerHTML = '<div class="row"><span class="mark">☰</span><span>计划</span></div><ol></ol>'
+        main.appendChild(card)
+      }
+      const list = card.querySelector('ol')
+      list.innerHTML = ''
+      for (const entry of update.entries ?? []) {
+        const li = document.createElement('li')
+        li.textContent = entry.content
+        if (entry.status === 'completed') li.className = 'done'
+        if (entry.status === 'in_progress') li.className = 'doing'
+        list.appendChild(li)
+      }
+      break
+    }
+    default: break
+  }
+}
+
+function closeStreams() {
+  if (thoughtBox !== null) { thoughtBox.querySelector('summary').textContent = '思考过程'; thoughtBox = null }
+  agentBubble = null
+}
+
+// ── permissions (server -> client request) ─────────────────────────────────
+function onPermission(message) {
+  const params = message.params ?? {}
+  $('permTool').textContent =
+    `${params.toolCall?.title ?? params.toolCall?.toolCallId ?? 'tool'} · ` +
+    `${JSON.stringify(params.toolCall?.rawInput ?? {})}`
+  const opts = $('permOpts')
+  opts.innerHTML = ''
+  const dialog = $('perm')
+  ;(params.options ?? []).forEach((option) => {
+    const button = document.createElement('button')
+    button.textContent = option.name
+    button.onclick = () => {
+      dialog.close()
+      void post({ jsonrpc: '2.0', id: message.id,
+        result: { outcome: { outcome: 'selected', optionId: option.optionId } } })
+    }
+    opts.appendChild(button)
+  })
+  dialog.oncancel = () => {
+    void post({ jsonrpc: '2.0', id: message.id,
+      result: { outcome: { outcome: 'cancelled' } } })
+  }
+  dialog.showModal()
+}
+
+// ── conversation ───────────────────────────────────────────────────────────
+function addUser(text) {
+  const row = document.createElement('div')
+  row.className = 'msg user'
+  row.innerHTML = '<div class="who">我</div><div class="body"><div class="bubble"></div></div>'
+  row.querySelector('.bubble').textContent = text
+  main.appendChild(row)
+  main.scrollTop = main.scrollHeight
+}
+
+function addMeta(text, isError) {
+  closeStreams()
+  const meta = document.createElement('div')
+  meta.className = isError ? 'meta err' : 'meta'
+  meta.textContent = text
+  main.appendChild(meta)
+  main.scrollTop = main.scrollHeight
+}
+
+function setBusy(on) {
+  busy = on
+  $('stop').hidden = !on
+  $('send').disabled = on
+  $('new').disabled = on
+}
+
+async function newSession() {
+  const created = await request('session/new', { cwd: '/', mcpServers: [] })
+  sessionId = created.sessionId
+  addMeta(`session ${sessionId}`)
+}
+
+async function send() {
+  const text = input.value.trim()
+  if (text === '' || busy) return
+  input.value = ''
+  addUser(text)
+  setBusy(true)
+  try {
+    const result = await request('session/prompt', {
+      sessionId,
+      prompt: [{ type: 'text', text }],
+    })
+    addMeta(`✓ ${result.stopReason}`)
+  } catch (error) {
+    addMeta(`✗ ${error.message ?? String(error)}`, true)
+  } finally {
+    setBusy(false)
+    closeStreams()
+    input.focus()
+  }
+}
+
+$('send').onclick = send
+input.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() }
+})
+$('stop').onclick = () => {
+  if (sessionId !== undefined) void request('session/cancel', { sessionId }).catch(() => undefined)
+}
+$('new').onclick = async () => {
+  if (sessionId !== undefined) await request('session/close', { sessionId }).catch(() => undefined)
+  await newSession()
+}
+
+// ── boot ───────────────────────────────────────────────────────────────────
+void (async () => {
+  try {
+    const response = await post({ jsonrpc: '2.0', id: 1, method: 'initialize',
+      params: { protocolVersion: 1, clientCapabilities: {} } })
+    connectionId = response.headers.get('acp-connection-id')
+    const body = JSON.parse(await response.text())
+    if (body.error !== undefined) throw new Error(body.error.message)
+    $('title').textContent = `${body.result.agentInfo.name} · ACP`
+    openStream()
+    await newSession()
+    setStatus(true, `已连接 · ${body.result.agentInfo.name}`)
+    input.focus()
+  } catch (error) {
+    setStatus(false, `连接失败: ${error.message ?? error}`)
+    banner.className = 'meta err'
+  }
+})()
+</script>
+</body>
+</html>

@@ -95,7 +95,10 @@ dsh --profile acp serve --port 7800            # 默认只绑 127.0.0.1
 dsh --profile acp serve --host 0.0.0.0 --port 7800 --token s3cret
 ```
 
-web 挂载模式（形态 2）在 GUI 端口上提供相同的路由。
+serve 端口还在 `GET /` 内置了一个单文件 web 客户端--浏览器打开
+http://127.0.0.1:7800 就是完整聊天界面（流式、思考、工具卡片、计划、授权弹窗），
+全部由上述 ACP 路由驱动--即"这套接口撑得起 web 界面"的参照实证。web 挂载模式
+（形态 2）在 GUI 端口上提供相同的路由。
 
 ### HTTP 传输规范
 

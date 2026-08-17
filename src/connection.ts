@@ -41,8 +41,6 @@ export interface AcpDeps {
 
 /** Build the AgentApp with every M1 handler registered. */
 export function buildAcpApp(deps: AcpDeps): AgentApp {
-  let connectionContext: AgentContext | undefined
-  const context = () => connectionContext
   const log = deps.log
 
   return agent({ name: 'dsh-acp' })
@@ -56,7 +54,7 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
       },
       authMethods: [],
     }))
-    .onRequest('session/new', async ({ params }) => {
+    .onRequest('session/new', async ({ params, client }) => {
       if (typeof params.cwd !== 'string' || params.cwd.length === 0) {
         throw new RequestError(-32602, 'session/new requires an absolute cwd')
       }
@@ -74,8 +72,13 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
         cwd: params.cwd,
         lastTurnEnd: undefined,
         prompting: false,
+        // Bound to the connection that created it: every notification for
+        // this session (updates, permission requests) goes to THAT client.
+        // A single shared context would let the latest connection steal
+        // another client's sessions.
+        client,
       }
-      const emit = makeEmitter(sessionId, { context }, log)
+      const emit = makeEmitter(sessionId, { context: () => entry.client }, log)
       const { agent: created, dispose } = await deps.agents.create({
         sessionId: SessionId(sessionId),
         meta: { cwd: params.cwd },
@@ -83,7 +86,7 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
         setup: (agentCtx) => {
           installModelSelection(agentCtx, { current: selection, assembled: undefined })
           attachEventBridge(agentCtx, entry, emit)
-          attachPermBridge(agentCtx, sessionId, entry, deps.offerAlwaysPermissions, context, log)
+          attachPermBridge(agentCtx, sessionId, entry, deps.offerAlwaysPermissions, () => entry.client, log)
         },
       })
       entry.agent = created
@@ -146,9 +149,6 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
       deps.table.remove(params.sessionId)
       await entry.dispose()
       return {}
-    })
-    .onConnect((conn) => {
-      connectionContext = (conn as unknown as AgentConnection).client
     })
 }
 

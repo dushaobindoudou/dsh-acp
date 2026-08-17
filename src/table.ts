@@ -4,6 +4,7 @@
  */
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { TurnEndReason } from '@deepseek-ai/dsh-session'
+import type { AgentContext } from '@agentclientprotocol/sdk'
 
 /** Live per-session state the bridges mutate while streaming. */
 export interface AcpSessionEntry {
@@ -14,6 +15,8 @@ export interface AcpSessionEntry {
   readonly cwd: string
   /** Reason of the most recent `turn/end` observed by the event bridge. */
   lastTurnEnd: TurnEndReason | undefined
+  /** The ACP client (connection) that created this session; its notification channel. */
+  client: AgentContext | undefined
   /** Guard: one in-flight session/prompt at a time. */
   prompting: boolean
 }

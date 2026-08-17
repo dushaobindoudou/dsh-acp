@@ -20,12 +20,16 @@
  *   GET    /acp/healthz    liveness probe (no auth)
  */
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
+import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { ndJsonStream } from '@agentclientprotocol/sdk'
 import type { AgentApp, AgentConnection } from '@agentclientprotocol/sdk'
 
 export interface AcpHttpOptions {
   readonly token: string | undefined
+  /** Serve the built-in single-file web client at GET / (standalone serve
+   * mode only - a web composition already has the real GUI on that path). */
+  readonly serveUi: boolean
 }
 
 export interface AcpRouter {
@@ -37,6 +41,11 @@ const encoder = new TextEncoder()
 
 export function createAcpRouter(app: AgentApp, opts: AcpHttpOptions, log: (message: string) => void): AcpRouter {
   const connections = new Map<string, AcpHttpConnection>()
+  let uiCache: string | undefined
+  const webUi = (): string => {
+    uiCache ??= readFileSync(new URL('../webui.html', import.meta.url), 'utf8')
+    return uiCache
+  }
 
   interface AcpHttpConnection {
     readonly id: string
@@ -127,6 +136,12 @@ export function createAcpRouter(app: AgentApp, opts: AcpHttpOptions, log: (messa
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const method = req.method ?? 'GET'
+
+    if (opts.serveUi && method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(webUi())
+      return
+    }
 
     if (method === 'GET' && (url.pathname === '/acp/healthz' || url.pathname === '/healthz')) {
       res.writeHead(200).end('ok')
@@ -219,7 +234,7 @@ export function startServeTransport(
   opts: { host: string; port: number; token: string | undefined },
   log: (message: string) => void,
 ): Promise<ServeHandle> {
-  const router = createAcpRouter(app, { token: opts.token }, log)
+  const router = createAcpRouter(app, { token: opts.token, serveUi: true }, log)
   const server: Server = createServer((req, res) => {
     void router.handle(req, res).catch((error: unknown) => {
       log(`http handler failed: ${String(error instanceof Error ? error.message : error)}`)

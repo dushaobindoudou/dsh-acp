@@ -95,7 +95,12 @@ dsh --profile acp serve --port 7800            # bind 127.0.0.1 by default
 dsh --profile acp serve --host 0.0.0.0 --port 7800 --token s3cret
 ```
 
-The same routes are served in web-mounted mode (Form 2) on the GUI's port.
+The serve port also ships a built-in single-file web client at `GET /` - open
+http://127.0.0.1:7800 in any browser for a complete chat UI (streaming,
+thoughts, tool cards, plans, permission dialogs) driven purely by the ACP
+routes above. It is the reference proof that this surface can carry a web
+interface. The same routes are served in web-mounted mode (Form 2) on the
+GUI's port.
 
 ### HTTP transport reference
 

@@ -137,6 +137,13 @@ try {
   assert.equal(await health.text(), 'ok')
   PASS('healthz')
 
+  const ui = await fetch(`${base}/`)
+  assert.equal(ui.status, 200)
+  assert.match(ui.headers.get('content-type') ?? '', /text\/html/)
+  const html = await ui.text()
+  assert.ok(html.includes('data-acp-webui') && html.includes('session/prompt'))
+  PASS('built-in web UI served at GET /')
+
   const initResponse = await post({ jsonrpc: '2.0', id: nextId++, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } })
   assert.equal(initResponse.status, 200)
   const connectionId = initResponse.headers.get('acp-connection-id') ?? ''
@@ -146,7 +153,24 @@ try {
   PASS(`initialize (200, connection ${connectionId.slice(0, 8)}, agentName=dsh-e2e)`)
 
   await openStream(connectionId)
-  PASS('SSE stream open')
+  PASS('SSE stream open (Acp-Connection-Id header)')
+
+  // EventSource cannot set headers; the UI relies on the query-parameter
+  // form. One connection carries ONE active stream, so probe with a second
+  // connection instead of displacing the first stream. This doubles as the
+  // multi-client regression: creating AND deleting a second connection must
+  // not steal the first connection's notification channel (a shared context
+  // bug found by this exact sequence - notifications vanished silently).
+  {
+    const secondInit = await post({ jsonrpc: '2.0', id: 900, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } })
+    const secondId = secondInit.headers.get('acp-connection-id') ?? ''
+    const queryStream = await fetch(`${base}/acp/stream?connection=${secondId}`)
+    assert.equal(queryStream.status, 200)
+    assert.match(queryStream.headers.get('content-type') ?? '', /text\/event-stream/)
+    await queryStream.body.cancel().catch(() => undefined)
+    await fetch(`${base}/acp`, { method: 'DELETE', headers: { 'acp-connection-id': secondId } })
+    PASS('SSE stream opens via ?connection= query form (used by EventSource)')
+  }
 
   const session = await send(connectionId, 'session/new', { cwd: project, mcpServers: [] })
   assert.match(session.sessionId, /^acp-/)
@@ -157,6 +181,9 @@ try {
   const updates = notifications
     .filter((n) => n.method === 'session/update' && n.params.sessionId === session.sessionId)
     .map((n) => n.params.update)
+  if (!(updates.filter((u) => u.sessionUpdate === 'agent_thought_chunk').length === 1)) {
+    process.stderr.write(`DEBUG notifications=${JSON.stringify(notifications.slice(0, 5))}\n`)
+  }
   assert.ok(updates.filter((u) => u.sessionUpdate === 'agent_thought_chunk').length === 1)
   assert.ok(updates.filter((u) => u.sessionUpdate === 'agent_message_chunk').length >= 2)
   PASS('prompt #1 streamed thought + message chunks over SSE')

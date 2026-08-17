@@ -111,7 +111,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const mountWeb = (webServer: WebServerLike) => {
     if (webMounted) return
     webMounted = true
-    const router = createAcpRouter(app, { token: config.token }, log)
+    const router = createAcpRouter(app, { token: config.token, serveUi: false }, log)
     const dispose = ['/acp', '/acp/stream', '/acp/healthz'].map((path) =>
       webServer.register({ kind: 'exact', path, handler: (req, res) => router.handle(req, res) }),
     )

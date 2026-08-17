@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-17
+
+### Added
+
+- Built-in single-file web client (`webui.html`) served at `GET /` in serve
+  mode: a complete chat UI - streaming, thought panels, tool cards, plan
+  checklist, permission dialogs, cancel - driven purely by the ACP routes
+  (initialize, SSE via the `?connection=` form EventSource needs,
+  session/prompt). Proof that the ACP surface carries a web interface.
+
+### Fixed
+
+- Multi-client notification binding: a session's updates and permission
+  requests now go to the connection that created it (captured from the
+  `session/new` request context). Previously all sessions emitted through one
+  shared context - the latest connection stole every other client's
+  notifications, and deleting it made them vanish silently. Found by the
+  serve e2e probe (kept as the regression test).
+
 ## [0.7.0] - 2026-08-17
 
 ### Added
