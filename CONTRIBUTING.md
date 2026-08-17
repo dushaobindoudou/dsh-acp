@@ -1,4 +1,4 @@
-# Contributing to dsh-acp
+# Contributing to dsh-acp (npm: dsh-acp-server)
 
 Thanks for improving dsh-acp! This project is an ACP (Agent Client Protocol) server
 shipped as a [dsh](https://github.com/deepseek-ai/deepseek-harness) profile bundle.
@@ -9,7 +9,9 @@ shipped as a [dsh](https://github.com/deepseek-ai/deepseek-harness) profile bund
 pnpm install
 pnpm run build      # tsc -> lib/
 pnpm test           # unit tests
-node test/e2e/e2e.test.mjs   # end-to-end against a real `dsh --profile acp` boot
+pnpm run test:e2e   # four suites against real `dsh` boots: stdio, serve
+                    # (HTTP+SSE), web-mounted (shared webServer port), and the
+                    # bare-install grace path
 ```
 
 The e2e test requires the `dsh` CLI on PATH (`npm i -g @deepseek-ai/dsh`) and network

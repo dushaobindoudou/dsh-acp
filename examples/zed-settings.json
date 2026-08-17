@@ -1,0 +1,12 @@
+// Zed → Settings → Agent Servers (paste into ~/.config/zed/settings.json).
+// Starts dsh-acp-server; the bin auto-bootstraps the `acp` profile on first
+// use (bootstrap output goes to stderr, so Zed's stdout only sees ACP frames).
+{
+  "agent_servers": {
+    "dsh": {
+      "type": "custom",
+      "command": "dsh-acp-server",
+      "args": []
+    }
+  }
+}

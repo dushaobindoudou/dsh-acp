@@ -1,0 +1,15 @@
+# Pin the model for ACP sessions (and rename the agent clients see).
+# Drop into your profile's cordis.patch.yml ($DSH_HOME/profiles/acp/ or web/).
+# provider and model must be set together; omit both to follow the live
+# profile default (agent-default-model, including in-GUI model switches when
+# web-mounted). `token` requires bearer auth on the HTTP transport
+# (web-mounted mode; standalone `serve` takes --token on its command line).
+- id: acp-server
+  inject: [agents, agentDefaultModel, webServer]   # keep only for the web profile
+  config:
+    agentName: my-dsh
+    provider: liepin
+    model: glm-5-3
+    token: s3cret
+    offerAlwaysPermissions: true
+    flushOnTurnEnd: true

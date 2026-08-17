@@ -26,3 +26,24 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run build
       - run: pnpm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      # The e2e suites boot the real dsh (plugin add from this repo into a
+      # throwaway $DSH_HOME) and drive full conversations over stdio,
+      # HTTP+SSE (serve), and the shared webServer port.
+      - run: npm i -g @deepseek-ai/dsh
+      - run: pnpm run test:e2e
+        env:
+          DSH_ACP_PKG: ${{ github.workspace }}

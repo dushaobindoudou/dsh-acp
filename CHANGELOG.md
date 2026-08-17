@@ -6,11 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-17
+
+### Added
+
+- `examples/` - runnable usage specs: `curl-conversation.sh` (a complete
+  initialize → SSE → session → prompt → teardown conversation using only
+  curl, verified against a live server), `zed-settings.json`, and profile
+  patch samples (`web-mounted.yml`, `model-pin.yml`).
+- README restructured around the two final forms (`dsh-acp-server` standalone,
+  `dsh web` together) with a full configuration reference (including `token`)
+  and an HTTP transport reference.
+
+### Changed
+
+- Reorganized this changelog: entries accumulated under *Unreleased* were
+  filed under their actually-released versions (0.2.0 - 0.6.1).
+
+## [0.6.1] - 2026-08-17
+
 ### Fixed
 
 - The default model is read per `session/new` instead of being captured once
   at plugin mount: sessions now follow config-store defaults and in-GUI model
   switches (a mount-time snapshot could pin a stale pre-config-load selection).
+
+## [0.6.0] - 2026-08-17
 
 ### Fixed
 
@@ -19,6 +40,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `end_turn`: the request now fails with a JSON-RPC error carrying the cause
   (`agent turn failed: ...`) and the failure is logged to stderr. Found
   against a real misconfigured provider (`baseURL: "11111"`).
+
+## [0.5.1] - 2026-08-17
+
+### Fixed
+
+- `setup-webacp.mjs` no longer re-runs `dsh plugin add` when the bundle is
+  already in the profile manifest: a bare-spec re-add could fail on stale npm
+  metadata right after a release and abort the setup before writing the
+  web-mounted row.
+
+## [0.5.0] - 2026-08-17
 
 ### Added
 
@@ -30,6 +62,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   bundle: the launcher hardcodes its `web`/`plugin` subcommands before any
   plugin parses argv.
 
+## [0.4.0] - 2026-08-17
+
 ### Added
 
 - `dsh web` auto-starts ACP: setup-webacp.mjs now installs INTO the web
@@ -40,6 +74,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transport entirely, daemon boots get a 2s stdin-EOF grace window instead of
   taking the GUI down (previously a silent exit 0).
 
+## [0.3.0] - 2026-08-17
+
 ### Added
 
 - Web-mounted mode: `dsh plugin --profile web add dsh-acp-server` plus the
@@ -49,6 +85,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optional `token` config for bearer auth. Zero races: Cordis inject semantics
   guarantee the shared service exists before the ACP row mounts.
 
+## [0.2.0] - 2026-08-17
+
 ### Added
 
 - `serve` mode: `dsh --profile acp serve [--host] [--port] [--token]` runs a
@@ -56,6 +94,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Acp-Connection-Id binding, bearer auth, multi-client) following the ACP
   streamable-HTTP RFD draft shape. stdio editor mode unchanged; the acp-chat
   client gained `--url`/`--token` remote mode.
+
+## [0.1.1] - 2026-08-17
 
 ### Fixed
 
@@ -66,34 +106,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   partial closure produced a wall of "missing peer" warnings on
   `dsh plugin add`. Installs are now warning-free with every peer resolved.
 
-### Changed
-
-- npm package name is `dsh-acp-server` (the plain `dsh-acp` name on npm
-  belongs to another project); bin renamed to `dsh-acp-server` to avoid a
-  global bin collision. The `acp-server` plugin row id is unchanged.
-- Fixed `types` / `exports` paths to the actual `lib/*.d.ts` outputs
-  (was pointing at a nonexistent `lib/types/`).
-
-### Added
-
-- Plugin configuration (Schemastery schema, validated at load, all defaults
-  in schema): `agentName` (initialize.agentInfo.name), `provider`/`model`
-  pin for ACP sessions (both-or-neither, else follows the profile default),
-  `offerAlwaysPermissions` (hide allow_always/reject_always, which M1 maps
-  to one-shot decisions), `flushOnTurnEnd`. Users override keys in their
-  own profile patch layer; the e2e run proves the override reaches the wire
-  (`initialize.agentInfo.name`).
-
-### Changed
-
-- Install path now uses the official `dsh plugin --profile acp add <pkg>`
-  command (profile manifest is never hand-written); `bin/setup-profile.mjs`
-  is a thin wrapper over it, and the e2e test installs through the same
-  command.
-- Added a `prepare` build script so source installs from git can build
-  `lib/` (requires the pnpm `allowBuilds` authorization documented in the
-  README); npm/tarball installs ship prebuilt and need no authorization.
-
 ## [0.1.0] - 2026-08-17
 
 ### Published
@@ -101,7 +113,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `dsh-acp-server@0.1.0` is live on npm (prebuilt; `dsh plugin --profile acp
   add dsh-acp-server`). Verified end-to-end: registry install -> full ACP
   conversation -> tool lifecycle -> clean exit, in a throwaway $DSH_HOME.
-
 
 ### Added
 
@@ -116,7 +127,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `session/request_permission` with allow/reject once/always options.
 - stopReason mapping for every DSH turn-end reason (completed, aborted,
   max-tokens, error, blocked, interrupted).
+- Plugin configuration (Schemastery schema, validated at load, all defaults
+  in schema): `agentName`, `provider`/`model` pin (both-or-neither, else
+  follows the profile default), `offerAlwaysPermissions`, `flushOnTurnEnd`.
 - `bin/setup-profile.mjs` one-command profile installer; `dsh-acp` launcher
   bin for editor integration.
-- `dsh-acp/test/mock-llm` deterministic mock LLM provider + e2e harness that
-  boots the real dsh process and asserts the full wire behavior.
+
+### Changed
+
+- Install path uses the official `dsh plugin --profile acp add <pkg>`
+  command (the profile manifest is never hand-written); the e2e test installs
+  through the same command.
+- `prepare` build script added so source installs from git can build `lib/`
+  (requires the pnpm `allowBuilds` authorization documented in the README);
+  npm/tarball installs ship prebuilt and need no authorization.
+- npm package name is `dsh-acp-server` (the plain `dsh-acp` name on npm
+  belongs to another project); bin renamed to `dsh-acp-server` to avoid a
+  global bin collision. The `acp-server` plugin row id is unchanged.
+- `types` / `exports` paths fixed to the actual `lib/*.d.ts` outputs
+  (were pointing at a nonexistent `lib/types/`).

@@ -1,0 +1,9 @@
+# Web-mounted mode: the GUI and ACP in one process on one port.
+#
+# What bin/setup-webacp.mjs appends to the `web` profile's cordis.patch.yml
+# (it first runs the official `dsh plugin --profile web add dsh-acp-server`).
+# The row-level inject makes Cordis start the acp-server fiber only after
+# the shared webServer service exists - the stdio transport can never race
+# a web boot. Boot with plain `dsh web`: http://127.0.0.1:3080 = GUI, /acp = ACP.
+- id: acp-server
+  inject: [agents, agentDefaultModel, webServer]
