@@ -30,39 +30,30 @@ function dumpLogs() {
   }
 }
 
-// ── 1. throwaway home + profile ────────────────────────────────────────────
+// ── 1+2. install via the OFFICIAL command into a throwaway home ───────────
+// `dsh plugin --profile acp add <path>` initializes the profile template,
+// installs the bundle with pnpm, and reconciles dsh.profile.bundles itself.
 const tmp = mkdtempSync(join(tmpdir(), 'dsh-acp-e2e-'))
 const home = join(tmp, 'home')
 const project = join(tmp, 'project')
-const profileDir = join(home, 'profiles', 'acp')
 mkdirSync(project, { recursive: true })
-mkdirSync(profileDir, { recursive: true })
-writeFileSync(
-  join(profileDir, 'package.json'),
-  `${JSON.stringify({
-    name: 'dsh-profile-acp',
-    private: true,
-    dependencies: {},
-    dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', 'dsh-acp'] } },
-  }, null, 2)}\n`,
-)
-writeFileSync(join(profileDir, 'pnpm-workspace.yaml'), 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n')
 
-PASS(`created profile scaffold at ${profileDir}`)
-
-// ── 2. install the local dsh-acp into the profile ─────────────────────────
-const install = spawnSync('pnpm', ['add', repoRoot, '--ignore-scripts'], {
-  cwd: profileDir,
+const install = spawnSync(dshBin, ['plugin', '--profile', 'acp', 'add', repoRoot], {
   encoding: 'utf8',
-  env: process.env,
+  env: { ...process.env, DSH_HOME: home },
   timeout: 240_000,
 })
 if (install.status !== 0) {
   process.stderr.write(install.stdout ?? '')
   process.stderr.write(install.stderr ?? '')
-  FAIL('pnpm add (local dsh-acp) failed')
+  FAIL('dsh plugin --profile acp add failed')
 }
-PASS('installed local dsh-acp into the profile')
+const bundles = JSON.parse(readFileSync(join(home, 'profiles', 'acp', 'package.json'), 'utf8'))
+  .dsh?.profile?.bundles ?? []
+if (!bundles.includes('dsh-acp')) {
+  FAIL(`dsh.profile.bundles did not pick up dsh-acp: ${JSON.stringify(bundles)}`)
+}
+PASS('installed dsh-acp via `dsh plugin add` (bundles list reconciled)')
 
 // ── 3. boot dsh --profile acp with the mock overlay ───────────────────────
 const overlay = join(repoRoot, 'test', 'e2e', 'test-acp.overlay.yml')

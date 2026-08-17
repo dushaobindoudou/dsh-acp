@@ -36,8 +36,7 @@
   "files": [
     "lib",
     "bin",
-    "cordis.patch.yml",
-    "profile-template"
+    "cordis.patch.yml"
   ],
   "dsh": {
     "bundle": {
@@ -50,7 +49,8 @@
     "test": "npm run build && node --test \"test/unit/*.test.mjs\"",
     "test:e2e": "node test/e2e/e2e.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepublishOnly": "npm run clean && npm run build"
+    "prepublishOnly": "npm run clean && npm run build",
+    "prepare": "npm run build"
   },
   "engines": {
     "node": ">=22"

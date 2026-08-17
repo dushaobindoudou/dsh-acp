@@ -31,15 +31,39 @@ Roadmap: `session/load` replay, `session/resume`/`list`, modes (plan mode) + con
 
 Requires Node.js ≥ 22, pnpm, and the `dsh` CLI (`npm i -g @deepseek-ai/dsh`).
 
+Install the bundle into an `acp` profile with the official plugin command (it
+initializes the profile, installs the package, and keeps `dsh.profile.bundles`
+in sync - see the harness docs, *打包与安装插件*):
+
 ```bash
-# from a checkout of this repo (published package works the same way)
-node bin/setup-profile.mjs --pkg /path/to/dsh-acp
+# from GitHub (source install; see note below)
+dsh plugin --profile acp add github:dushaobindoudou/dsh-acp
+
+# or from a local checkout / tarball / npm (no build authorization needed)
+dsh plugin --profile acp add /path/to/dsh-acp
+dsh plugin --profile acp add ./dsh-acp-0.1.0.tgz
+dsh plugin --profile acp add dsh-acp
 
 # boots the ACP server on stdio
 dsh --profile acp
 ```
 
-The setup script creates `$DSH_HOME/profiles/acp` with `dsh.profile.bundles = ["@deepseek-ai/dsh-base", "dsh-acp"]` and installs the bundle via pnpm. Re-run it any time; `--force` rewrites the manifest.
+`node bin/setup-profile.mjs --pkg <spec>` is a thin convenience wrapper over
+the same command.
+
+**GitHub installs pull source, not build output.** The package's `prepare`
+script builds `lib/` on install; pnpm ≥ 10 refuses to run it until you add the
+key it prints to the profile's `pnpm-workspace.yaml`:
+
+```yaml
+allowBuilds:
+  dsh-acp: true
+```
+
+then re-run the `add`. Prefer locking a commit (`github:…/dsh-acp#<sha>`), or
+avoid the authorization entirely with a prebuilt npm package or tarball.
+Verify any time with `dsh --profile acp --dump-config` (a `# == dsh-acp` layer
+should appear).
 
 ## Try it without an editor
 

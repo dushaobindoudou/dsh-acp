@@ -32,14 +32,28 @@ M1（当前版本）实现：
 需要 Node.js ≥ 22、pnpm 和 `dsh` CLI（`npm i -g @deepseek-ai/dsh`）。
 
 ```bash
-# 从本仓库检出目录（发布包同样方式）
-node bin/setup-profile.mjs --pkg /path/to/dsh-acp
+# 从 GitHub（源码安装，见下方说明）
+dsh plugin --profile acp add github:dushaobindoudou/dsh-acp
+
+# 或从本地检出 / tarball / npm（无需构建授权）
+dsh plugin --profile acp add /path/to/dsh-acp
+dsh plugin --profile acp add ./dsh-acp-0.1.0.tgz
+dsh plugin --profile acp add dsh-acp
 
 # 在 stdio 上启动 ACP 服务器
 dsh --profile acp
 ```
 
-setup 脚本会创建 `$DSH_HOME/profiles/acp`（`dsh.profile.bundles = ["@deepseek-ai/dsh-base", "dsh-acp"]`）并用 pnpm 安装。可重复执行，`--force` 强制重写清单。
+`node bin/setup-profile.mjs --pkg <spec>` 是同一命令的薄封装。
+
+**GitHub 安装拉取的是源码而非构建产物。** 包的 `prepare` 脚本会在安装时构建 `lib/`；pnpm ≥ 10 在获得显式允许前会拒绝运行它——把 pnpm 打印的键加进 profile 的 `pnpm-workspace.yaml`：
+
+```yaml
+allowBuilds:
+  dsh-acp: true
+```
+
+然后重新执行 `add`。建议锁定 commit（`github:…/dsh-acp#<sha>`）；或直接用预构建的 npm 包 / tarball，完全绕开授权。随时可用 `dsh --profile acp --dump-config` 验证（应出现 `# == dsh-acp` 层）。
 
 ## 不装编辑器先试试
 
