@@ -38,7 +38,8 @@ const home = join(tmp, 'home')
 const project = join(tmp, 'project')
 mkdirSync(project, { recursive: true })
 
-const install = spawnSync(dshBin, ['plugin', '--profile', 'acp', 'add', repoRoot], {
+const pkgSpec = process.env.DSH_ACP_PKG ?? repoRoot
+const install = spawnSync(dshBin, ['plugin', '--profile', 'acp', 'add', pkgSpec], {
   encoding: 'utf8',
   env: { ...process.env, DSH_HOME: home },
   timeout: 240_000,
@@ -50,8 +51,8 @@ if (install.status !== 0) {
 }
 const bundles = JSON.parse(readFileSync(join(home, 'profiles', 'acp', 'package.json'), 'utf8'))
   .dsh?.profile?.bundles ?? []
-if (!bundles.includes('dsh-acp')) {
-  FAIL(`dsh.profile.bundles did not pick up dsh-acp: ${JSON.stringify(bundles)}`)
+if (!bundles.includes('dsh-acp-server')) {
+  FAIL(`dsh.profile.bundles did not pick up dsh-acp-server: ${JSON.stringify(bundles)}`)
 }
 PASS('installed dsh-acp via `dsh plugin add` (bundles list reconciled)')
 

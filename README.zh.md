@@ -32,13 +32,14 @@ M1（当前版本）实现：
 需要 Node.js ≥ 22、pnpm 和 `dsh` CLI（`npm i -g @deepseek-ai/dsh`）。
 
 ```bash
-# 从 GitHub（源码安装，见下方说明）
-dsh plugin --profile acp add github:dushaobindoudou/dsh-acp
+# 从 npm 安装预构建包（推荐——无需构建授权）
+dsh plugin --profile acp add dsh-acp-server
 
-# 或从本地检出 / tarball / npm（无需构建授权）
-dsh plugin --profile acp add /path/to/dsh-acp
-dsh plugin --profile acp add ./dsh-acp-0.1.0.tgz
-dsh plugin --profile acp add dsh-acp
+# 或从 tarball 安装
+dsh plugin --profile acp add ./dsh-acp-server-0.1.0.tgz
+
+# 或从 GitHub（源码安装，见下方说明）
+dsh plugin --profile acp add github:dushaobindoudou/dsh-acp
 
 # 在 stdio 上启动 ACP 服务器
 dsh --profile acp
@@ -53,7 +54,7 @@ allowBuilds:
   dsh-acp: true
 ```
 
-然后重新执行 `add`。建议锁定 commit（`github:…/dsh-acp#<sha>`）；或直接用预构建的 npm 包 / tarball，完全绕开授权。随时可用 `dsh --profile acp --dump-config` 验证（应出现 `# == dsh-acp` 层）。
+然后重新执行 `add`。建议锁定 commit（`github:dushaobindoudou/dsh-acp#<sha>`)；或直接用预构建的 npm 包 / tarball，完全绕开授权。随时可用 `dsh --profile acp --dump-config` 验证（应出现 `# == dsh-acp` 层）。
 
 ## 不装编辑器先试试
 
@@ -69,7 +70,7 @@ node bin/acp-chat.mjs            # 启动 `dsh --profile acp` 并进入对话
 |---|---|---|
 | [Zed](https://zed.dev) | 编辑器（参考客户端） | 下方 `agent_servers` 配置 |
 | [acpx](https://github.com/openclaw/acpx) | 命令行 | `npx acpx@latest --agent 'dsh --profile acp' "你好"` |
-| [ghost.nvim](https://github.com/assagman/ghost.nvim) / [acpear.nvim](https://github.com/Eric-Song-Nop/acpear.nvim) | Neovim | 插件配置 → 命令 `dsh-acp` |
+| [ghost.nvim](https://github.com/assagman/ghost.nvim) / [acpear.nvim](https://github.com/Eric-Song-Nop/acpear.nvim) | Neovim | 插件配置 → 命令 `dsh-acp-server` |
 | [acp.el](https://github.com/xenodium/acp.el) | Emacs | `(setq acp-agent-command '("dsh" "--profile" "acp"))` |
 | [obsidian-agent-client](https://github.com/RAIT-09/obsidian-agent-client) | Obsidian | 插件设置 |
 | [ACP-inspector](https://github.com/venikman/ACP-inspector) | 一致性/调试 | 校验线上流量 |
@@ -99,13 +100,13 @@ Zed → 设置 → `agent_servers`：
 {
   "dsh": {
     "type": "custom",
-    "command": "dsh-acp",
+    "command": "dsh-acp-server",
     "args": []
   }
 }
 ```
 
-`dsh-acp`（本包安装）是 `dsh --profile acp` 的薄启动器；可用 `DSH_BIN` 指向非 PATH 的 `dsh`。模型凭据沿用 dsh 的常规位置（`$DSH_HOME` 设置 / `DEEPSEEK_API_KEY`），与 Web UI 共享，无需二次配置。
+npm 包名为 `dsh-acp-server`（npm 上 `dsh-acp` 这个名字属于另一个项目）；其 `dsh-acp-server` bin 是 `dsh --profile acp` 的薄启动器。可用 `DSH_BIN` 指向非 PATH 的 `dsh`。模型凭据沿用 dsh 的常规位置（`$DSH_HOME` 设置 / `DEEPSEEK_API_KEY`），与 Web UI 共享，无需二次配置。
 
 ## 开发
 

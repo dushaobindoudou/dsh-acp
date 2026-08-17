@@ -28,7 +28,7 @@ const flag = (name, fallback) => {
   const index = args.indexOf(`--${name}`)
   return index !== -1 && args[index + 1] !== undefined ? args[index + 1] : fallback
 }
-const pkg = flag('pkg', 'dsh-acp')
+const pkg = flag('pkg', 'dsh-acp-server')
 const home = flag('home', env.DSH_HOME ?? join(env.HOME ?? '.', '.dsh'))
 
 process.stdout.write(`installing ${pkg} into the acp profile ...\n`)
@@ -45,4 +45,4 @@ if (result.status !== 0) {
   exit(result.status ?? 1)
 }
 
-process.stdout.write(`done. boot with:  dsh --profile acp   (DSH_HOME=${home})\n(or in Zed agent_servers: command "dsh-acp")\n`)
+process.stdout.write(`done. boot with:  dsh --profile acp   (DSH_HOME=${home})\n(or in Zed agent_servers: command "dsh-acp-server")\n`)

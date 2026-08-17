@@ -19,4 +19,4 @@
 
 - insert:
     - id: mock-llm
-      name: 'dsh-acp/test/mock-llm'
+      name: 'dsh-acp-server/test/mock-llm'

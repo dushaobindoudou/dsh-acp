@@ -5,3 +5,4 @@ lib/
 coverage/
 spike/
 test/e2e/.tmp/
+*.tgz

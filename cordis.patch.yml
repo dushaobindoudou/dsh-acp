@@ -18,4 +18,4 @@
 
 - insert:
     - id: acp-server
-      name: 'dsh-acp'
+      name: 'dsh-acp-server'

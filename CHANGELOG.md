@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- npm package name is `dsh-acp-server` (the plain `dsh-acp` name on npm
+  belongs to another project); bin renamed to `dsh-acp-server` to avoid a
+  global bin collision. The `acp-server` plugin row id is unchanged.
+- Fixed `types` / `exports` paths to the actual `lib/*.d.ts` outputs
+  (was pointing at a nonexistent `lib/types/`).
+
 ### Added
 
 - Plugin configuration (Schemastery schema, validated at load, all defaults

@@ -36,13 +36,14 @@ initializes the profile, installs the package, and keeps `dsh.profile.bundles`
 in sync - see the harness docs, *打包与安装插件*):
 
 ```bash
-# from GitHub (source install; see note below)
-dsh plugin --profile acp add github:dushaobindoudou/dsh-acp
+# prebuilt from npm (recommended — no build authorization needed)
+dsh plugin --profile acp add dsh-acp-server
 
-# or from a local checkout / tarball / npm (no build authorization needed)
-dsh plugin --profile acp add /path/to/dsh-acp
-dsh plugin --profile acp add ./dsh-acp-0.1.0.tgz
-dsh plugin --profile acp add dsh-acp
+# or from a tarball
+dsh plugin --profile acp add ./dsh-acp-server-0.1.0.tgz
+
+# or from GitHub (source install; see note below)
+dsh plugin --profile acp add github:dushaobindoudou/dsh-acp
 
 # boots the ACP server on stdio
 dsh --profile acp
@@ -116,13 +117,13 @@ Zed → Settings → `agent_servers`:
 {
   "dsh": {
     "type": "custom",
-    "command": "dsh-acp",
+    "command": "dsh-acp-server",
     "args": []
   }
 }
 ```
 
-`dsh-acp` (installed by this package) is a thin launcher for `dsh --profile acp`; point `DSH_BIN` at a non-PATH `dsh`. Model credentials come from the usual dsh places (`$DSH_HOME` settings / `DEEPSEEK_API_KEY`), shared with the web UI - no second setup.
+The npm package is `dsh-acp-server` (the plain `dsh-acp` name on npm belongs to another project); its `dsh-acp-server` bin is a thin launcher for `dsh --profile acp`. Point `DSH_BIN` at a non-PATH `dsh`. Model credentials come from the usual dsh places (`$DSH_HOME` settings / `DEEPSEEK_API_KEY`), shared with the web UI - no second setup.
 
 ## Development
 

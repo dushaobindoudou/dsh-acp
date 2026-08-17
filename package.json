@@ -1,5 +1,5 @@
 {
-  "name": "dsh-acp",
+  "name": "dsh-acp-server",
   "version": "0.1.0",
   "description": "Agent Client Protocol (ACP) server plugin for the DeepSeek Harness (dsh) — drive dsh agents from Zed and any ACP client",
   "type": "module",
@@ -18,17 +18,17 @@
     "cordis-plugin"
   ],
   "bin": {
-    "dsh-acp": "bin/dsh-acp.mjs"
+    "dsh-acp-server": "bin/dsh-acp.mjs"
   },
   "main": "lib/index.js",
-  "types": "lib/types/index.d.ts",
+  "types": "lib/index.d.ts",
   "exports": {
     ".": {
-      "types": "./lib/types/index.d.ts",
+      "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
     "./test/mock-llm": {
-      "types": "./lib/types/test/mock-llm.d.ts",
+      "types": "./lib/test/mock-llm.d.ts",
       "default": "./lib/test/mock-llm.js"
     },
     "./package.json": "./package.json"
