@@ -41,6 +41,25 @@ dsh --profile acp
 
 The setup script creates `$DSH_HOME/profiles/acp` with `dsh.profile.bundles = ["@deepseek-ai/dsh-base", "dsh-acp"]` and installs the bundle via pnpm. Re-run it any time; `--force` rewrites the manifest.
 
+## Try it without an editor
+
+`acp-chat` is a zero-install interactive terminal client bundled in this repo (REPL with streaming, tool-call display, plan rendering, and inline permission prompts):
+
+```bash
+node bin/acp-chat.mjs            # spawns `dsh --profile acp` and drops you into a chat
+```
+
+Third-party ACP clients that work today:
+
+| Client | Type | Try it |
+|---|---|---|
+| [Zed](https://zed.dev) | editor (reference client) | `agent_servers` custom entry below |
+| [acpx](https://github.com/openclaw/acpx) | CLI | `npx acpx@latest --agent 'dsh --profile acp' "hello"` |
+| [ghost.nvim](https://github.com/assagman/ghost.nvim) / [acpear.nvim](https://github.com/Eric-Song-Nop/acpear.nvim) | Neovim | plugin config → command `dsh-acp` |
+| [acp.el](https://github.com/xenodium/acp.el) | Emacs | `(setq acp-agent-command '("dsh" "--profile" "acp"))` |
+| [obsidian-agent-client](https://github.com/RAIT-09/obsidian-agent-client) | Obsidian | plugin settings |
+| [ACP-inspector](https://github.com/venikman/ACP-inspector) | conformance/debug | validates wire traffic |
+
 ## Use with Zed
 
 Zed → Settings → `agent_servers`:

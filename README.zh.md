@@ -41,6 +41,25 @@ dsh --profile acp
 
 setup 脚本会创建 `$DSH_HOME/profiles/acp`（`dsh.profile.bundles = ["@deepseek-ai/dsh-base", "dsh-acp"]`）并用 pnpm 安装。可重复执行，`--force` 强制重写清单。
 
+## 不装编辑器先试试
+
+`acp-chat` 是本仓库自带的零依赖终端交互客户端（REPL：流式输出、工具调用展示、plan 渲染、内联权限应答）：
+
+```bash
+node bin/acp-chat.mjs            # 启动 `dsh --profile acp` 并进入对话
+```
+
+现在就能用的第三方 ACP 客户端：
+
+| 客户端 | 类型 | 用法 |
+|---|---|---|
+| [Zed](https://zed.dev) | 编辑器（参考客户端） | 下方 `agent_servers` 配置 |
+| [acpx](https://github.com/openclaw/acpx) | 命令行 | `npx acpx@latest --agent 'dsh --profile acp' "你好"` |
+| [ghost.nvim](https://github.com/assagman/ghost.nvim) / [acpear.nvim](https://github.com/Eric-Song-Nop/acpear.nvim) | Neovim | 插件配置 → 命令 `dsh-acp` |
+| [acp.el](https://github.com/xenodium/acp.el) | Emacs | `(setq acp-agent-command '("dsh" "--profile" "acp"))` |
+| [obsidian-agent-client](https://github.com/RAIT-09/obsidian-agent-client) | Obsidian | 插件设置 |
+| [ACP-inspector](https://github.com/venikman/ACP-inspector) | 一致性/调试 | 校验线上流量 |
+
 ## 在 Zed 中使用
 
 Zed → 设置 → `agent_servers`：
