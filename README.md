@@ -67,24 +67,27 @@ avoid the authorization entirely with a prebuilt npm package or tarball.
 Verify any time with `dsh --profile acp --dump-config` (a `# == dsh-acp` layer
 should appear).
 
-## Share one port with the Web GUI
+## Share one port with the Web GUI (`dsh web` + ACP)
 
-The Web GUI and ACP can run in ONE process on ONE port - install into the `web`
-profile and boot it:
+Install into the `web` profile once, and every plain `dsh web` boot serves the
+GUI and ACP in one process on one port:
 
 ```bash
-node bin/setup-webacp.mjs        # or: dsh plugin --profile web add dsh-acp-server
-                                  # + the row-level inject from the script
-dsh --profile webacp             # http://127.0.0.1:3080 = GUI, /acp = ACP
+node bin/setup-webacp.mjs        # official `dsh plugin --profile web add` + the web-mounted row
+dsh web                          # http://127.0.0.1:3080 = GUI, /acp = ACP
+node bin/acp-chat.mjs --url http://127.0.0.1:3080
 ```
 
-The script clones the `web` profile to `webacp`, installs this bundle with the
-official `dsh plugin` command, and appends the deterministic web-mounted row
-(`inject: [agents, agentDefaultModel, webServer]` - Cordis then guarantees the
-shared `webServer` service exists before the ACP row mounts, so the two never
-race for stdio). ACP registers `/acp`, `/acp/stream`, and `/acp/healthz` on the
-web composition's shared HTTP server via its public `webServer.register` API.
-Set a `token` in the acp-server config to require bearer auth.
+Prefer to keep `web` untouched? `node bin/setup-webacp.mjs --clone webacp`
+gives the same on `dsh --profile webacp`.
+
+The script writes a row-level `inject: [agents, agentDefaultModel, webServer]`
+so Cordis starts the acp-server fiber only after the shared `webServer`
+service exists - the stdio transport can never race a web boot. A hand install
+without that row is safe too: the plugin detects a web composition late via
+service provisioning (terminal boots skip stdio entirely; daemon boots get an
+EOF grace window before exiting). Set a `token` in the acp-server config to
+require bearer auth.
 
 ## Remote access (`serve`, like `opencode serve`)
 

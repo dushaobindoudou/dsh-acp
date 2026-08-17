@@ -57,21 +57,23 @@ allowBuilds:
 
 然后重新执行 `add`。建议锁定 commit（`github:dushaobindoudou/dsh-acp#<sha>`)；或直接用预构建的 npm 包 / tarball，完全绕开授权。随时可用 `dsh --profile acp --dump-config` 验证（应出现 `# == dsh-acp` 层）。
 
-## 与 Web GUI 共用一个端口
+## 与 Web GUI 共用一个端口（`dsh web` + ACP）
 
-Web GUI 和 ACP 可以同进程、同端口--装进 `web` profile 再启动即可：
+往 `web` profile 装一次，之后每次 `dsh web` 都是同进程同端口同时服务 GUI 和 ACP：
 
 ```bash
-node bin/setup-webacp.mjs        # 或手动: dsh plugin --profile web add dsh-acp-server
-                                  # 再按脚本内容给 acp-server 行加行级 inject
-dsh --profile webacp             # http://127.0.0.1:3080 = GUI，/acp = ACP
+node bin/setup-webacp.mjs        # 内部执行官方 `dsh plugin --profile web add` + 写入挂载行
+dsh web                          # http://127.0.0.1:3080 = GUI，/acp = ACP
+node bin/acp-chat.mjs --url http://127.0.0.1:3080
 ```
 
-脚本会把 `web` profile 克隆为 `webacp`，用官方 `dsh plugin` 命令安装本 bundle，
-并追加确定性的 web 挂载行（`inject: [agents, agentDefaultModel, webServer]`--
-Cordis 保证共享的 `webServer` 服务先就绪再挂 ACP 行，二者不会争抢 stdio）。
-ACP 通过 web 组合公开的 `webServer.register` API 把 `/acp`、`/acp/stream`、
-`/acp/healthz` 注册到同一个 HTTP 服务上。在 acp-server 配置里设 `token` 可启用
+不想动 `web` 本体？`node bin/setup-webacp.mjs --clone webacp` 换成
+`dsh --profile webacp` 同样效果。
+
+脚本写入的行级 `inject: [agents, agentDefaultModel, webServer]` 让 Cordis 等
+共享 `webServer` 服务就绪后才挂 acp-server 行——stdio 传输永远不可能与 web 启动
+竞争。手动裸安装（没写这行）也安全：插件通过服务供给事件晚到挂载（终端启动直接
+跳过 stdio；守护式启动有 EOF 宽限期兜底）。在 acp-server 配置里设 `token` 可启用
 Bearer 鉴权。
 
 ## 远程接入（`serve`，类似 `opencode serve`）

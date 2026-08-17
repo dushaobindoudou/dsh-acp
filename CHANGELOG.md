@@ -8,6 +8,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `dsh web` auto-starts ACP: setup-webacp.mjs now installs INTO the web
+  profile by default (--clone keeps the original), so a plain `dsh web` boot
+  serves the GUI and /acp on one port.
+- Hand installs (no inject row) are safe: the plugin listens for the shared
+  webServer service and web-mounts late - terminal boots skip the stdio
+  transport entirely, daemon boots get a 2s stdin-EOF grace window instead of
+  taking the GUI down (previously a silent exit 0).
+
+### Added
+
 - Web-mounted mode: `dsh plugin --profile web add dsh-acp-server` plus the
   row-level `inject: [agents, agentDefaultModel, webServer]` (automated by
   bin/setup-webacp.mjs) serves the GUI and ACP in one process on one port -
