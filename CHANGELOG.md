@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `serve` mode: `dsh --profile acp serve [--host] [--port] [--token]` runs a
+  long-lived HTTP+SSE ACP endpoint (POST /acp + GET /acp/stream + DELETE,
+  Acp-Connection-Id binding, bearer auth, multi-client) following the ACP
+  streamable-HTTP RFD draft shape. stdio editor mode unchanged; the acp-chat
+  client gained `--url`/`--token` remote mode.
+
 ### Fixed
 
 - Declared the full dsh dependency closure (cordis, dsh-attachment/brand/

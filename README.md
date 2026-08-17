@@ -67,6 +67,36 @@ avoid the authorization entirely with a prebuilt npm package or tarball.
 Verify any time with `dsh --profile acp --dump-config` (a `# == dsh-acp` layer
 should appear).
 
+## Remote access (`serve`, like `opencode serve`)
+
+Editors get ACP over stdio, but you can also run a long-lived HTTP+SSE endpoint -
+for remote machines, shared agents, or curl - following the shape of the
+ACP [streamable-HTTP RFD](https://agentclientprotocol.com/rfds/streamable-http-websocket-transport.md)
+(POST sends client->server messages, a long-lived SSE GET stream carries all
+server->client messages, `Acp-Connection-Id` binds them):
+
+```bash
+dsh --profile acp serve --port 7800            # bind 127.0.0.1 by default
+dsh --profile acp serve --host 0.0.0.0 --port 7800 --token s3cret
+```
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /acp` | one JSON-RPC message per body; `initialize` -> `200` + `Acp-Connection-Id`; everything else -> `202` (response arrives on SSE) |
+| `GET /acp/stream` | SSE stream for the connection (header or `?connection=`) |
+| `DELETE /acp` | close the connection |
+| `GET /healthz` | liveness (no auth) |
+
+Several clients can be attached to one dsh process (one SDK connection each).
+Connect from anywhere with the bundled client:
+
+```bash
+node bin/acp-chat.mjs --url http://127.0.0.1:7800 --token s3cret
+```
+
+Without `serve` the profile still boots stdio-first, so Zed keeps working
+unchanged. Default bind is loopback; use `--token` whenever you bind beyond it.
+
 ## Try it without an editor
 
 `acp-chat` is a zero-install interactive terminal client bundled in this repo (REPL with streaming, tool-call display, plan rendering, and inline permission prompts):

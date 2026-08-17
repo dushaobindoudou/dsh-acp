@@ -57,6 +57,35 @@ allowBuilds:
 
 然后重新执行 `add`。建议锁定 commit（`github:dushaobindoudou/dsh-acp#<sha>`)；或直接用预构建的 npm 包 / tarball，完全绕开授权。随时可用 `dsh --profile acp --dump-config` 验证（应出现 `# == dsh-acp` 层）。
 
+## 远程接入（`serve`，类似 `opencode serve`）
+
+编辑器走 stdio；同时你也可以起一个常驻 HTTP+SSE 端点--用于远程机器、共享 agent 或
+curl 调试，形态跟随 ACP
+[streamable-HTTP 草案](https://agentclientprotocol.com/rfds/streamable-http-websocket-transport.md)
+（POST 发客户端->服务端消息，长连 SSE GET 流回收所有服务端->客户端消息，
+`Acp-Connection-Id` 绑定二者）：
+
+```bash
+dsh --profile acp serve --port 7800            # 默认只绑 127.0.0.1
+dsh --profile acp serve --host 0.0.0.0 --port 7800 --token s3cret
+```
+
+| 端点 | 用途 |
+|---|---|
+| `POST /acp` | 每次请求体一条 JSON-RPC 消息；`initialize` 返回 `200` + `Acp-Connection-Id`；其余返回 `202`（响应走 SSE） |
+| `GET /acp/stream` | 该连接的 SSE 流（头或 `?connection=`） |
+| `DELETE /acp` | 关闭连接 |
+| `GET /healthz` | 存活探针（免鉴权） |
+
+一个 dsh 进程可同时挂多个客户端（每个一条 SDK 连接）。从任意机器用自带客户端连：
+
+```bash
+node bin/acp-chat.mjs --url http://127.0.0.1:7800 --token s3cret
+```
+
+不带 `serve` 时 profile 仍是 stdio 优先，Zed 用法完全不变。默认只绑回环；对外绑定时请
+务必配合 `--token`。
+
 ## 不装编辑器先试试
 
 `acp-chat` 是本仓库自带的零依赖终端交互客户端（REPL：流式输出、工具调用展示、plan 渲染、内联权限应答）：

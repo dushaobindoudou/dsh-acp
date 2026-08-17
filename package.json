@@ -1,6 +1,6 @@
 {
   "name": "dsh-acp-server",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Agent Client Protocol (ACP) server plugin for the DeepSeek Harness (dsh) — drive dsh agents from Zed and any ACP client",
   "type": "module",
   "license": "MIT",
@@ -31,7 +31,11 @@
       "types": "./lib/test/mock-llm.d.ts",
       "default": "./lib/test/mock-llm.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./serve-startup": {
+      "types": "./lib/serve-startup.d.ts",
+      "default": "./lib/serve-startup.js"
+    }
   },
   "files": [
     "lib",
@@ -47,7 +51,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "test": "npm run build && node --test \"test/unit/*.test.mjs\"",
-    "test:e2e": "node test/e2e/e2e.test.mjs",
+    "test:e2e": "node test/e2e/e2e.test.mjs && node test/e2e/serve.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "npm run clean && npm run build",
     "prepare": "npm run build"
@@ -69,7 +73,10 @@
     "@deepseek-ai/dsh-timeout": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
-    "zod": "^3.25.0"
+    "zod": "^3.25.0",
+    "commander": "^15.0.0",
+    "@deepseek-ai/dsh-cmdline": "^0.1.0-rc.6",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

@@ -17,5 +17,7 @@
       You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
 
 - insert:
+    - id: acp-serve-startup
+      name: 'dsh-acp-server/serve-startup'
     - id: acp-server
       name: 'dsh-acp-server'

@@ -20,6 +20,10 @@ export const inject = ['agents', 'agentDefaultModel']
 import { Config, modelSelectionOf, validateModelPin } from './config.js'
 export { Config }
 export type { Config as AcpServerConfig } from './config.js'
+import { SERVE_STARTUP_SERVICE, type ServeOptions } from './serve-startup.js'
+export { SERVE_STARTUP_SERVICE } from './serve-startup.js'
+export type { ServeOptions } from './serve-startup.js'
+import { startServeTransport } from './http-transport.js'
 
 /** Process seams, overridable from tests (mirrors dsh-headless's `internals`). */
 export const internals: {
@@ -34,7 +38,7 @@ type AppExit = (code: number) => void
 
 const VERSION = '0.1.0'
 
-export function apply(ctx: Context, config: Config): void {
+export async function apply(ctx: Context, config: Config): Promise<void> {
   validateModelPin(config) // both-or-neither, fails the plugin loudly at load
   const exit = ctx.get('appExit') as AppExit | undefined
   if (exit === undefined) {
@@ -64,6 +68,30 @@ export function apply(ctx: Context, config: Config): void {
 
   const stdin = internals.stdin as Readable
   const stdout = internals.stdout as Writable
+
+  // Serve mode: `dsh --profile acp serve` publishes acpServeStartup and the
+  // process becomes a long-lived HTTP+SSE ACP endpoint instead of a stdio
+  // child. The publish happens in the serve-startup row, which mounts before
+  // this row in cordis.patch.yml.
+  const serveOptions = ctx.get(SERVE_STARTUP_SERVICE) as ServeOptions | undefined
+  if (serveOptions !== undefined) {
+    const handle = await startServeTransport(app, serveOptions, (message) => {
+      log(`serve: ${message}`)
+    })
+    log(`serve listening on http://${serveOptions.host}:${handle.port}${serveOptions.token !== undefined ? ' (bearer auth on)' : ''}`)
+    let serveClosed = false
+    ctx.effect(() => {
+      return () => {
+        if (serveClosed) return
+        serveClosed = true
+        void handle.close().finally(() => exit(0))
+      }
+    })
+    // A serve process is closed by its operator (SIGINT/SIGTERM), not by
+    // stdin: editors never attach one. Leave stdio untouched.
+    return
+  }
+
   const connection: AgentConnection = connectStdio(
     app,
     Readable.toWeb(stdin) as unknown as ReadableStream<Uint8Array>,
