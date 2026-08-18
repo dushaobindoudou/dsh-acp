@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-18
+
+### Added
+
+- Standard ACP surface completion: `session/list` (id, cwd, title),
+  `session/resume` (standard form of the vendor method), `session/load`
+  (reopen + replay the transcript as user/agent message chunks),
+  `session/set_mode` bridged to dsh plan mode with `current_mode_update`
+  push, `available_commands_update` from the dsh command registry with
+  single-`/command` prompt routing, and image prompt blocks persisted
+  through the dsh attachments service (`promptCapabilities.image`).
+- `dsh/sessions/watch` + `unwatch`: subscribe to any session's translated
+  live stream (`dsh/session/update` frames, same SessionUpdate shapes the
+  owner receives) - verified end-to-end with a third connection observing
+  a live prompt.
+- Agent-status transitions now push `dsh/changed {agents}` (throttled) so
+  host panels can track the live agent tree.
+
+### Fixed
+
+- Watch translator wiring now happens in every transport mode (previously
+  only the non-serve branches installed it, so serve-mode watch silently
+  translated nothing).
+
 ## [0.9.0] - 2026-08-17
 
 ### Added

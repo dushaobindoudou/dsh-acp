@@ -21,6 +21,7 @@
 import { RequestError } from '@agentclientprotocol/sdk'
 import type { AgentApp, AgentContext } from '@agentclientprotocol/sdk'
 import { extractSessionEventText } from '@deepseek-ai/dsh-session-query'
+import { watchSession, unwatchSession } from './watch.js'
 
 /** The capability key inside `clientCapabilities._meta`. */
 export const DSH_EXTENSIONS_KEY = 'dsh/extensions'
@@ -108,6 +109,14 @@ export interface DshServiceSnapshot {
       session?: { header?: { cwd?: string; parentSession?: string } }
     }>
   }
+  readonly planMode?: {
+    get(agent: { id: string }): { active: boolean } | undefined
+    set(agent: unknown, active: boolean): string
+  }
+  readonly commands?: {
+    list(agent: unknown): ReadonlyArray<{ name: string; description: string }>
+    execute(agent: unknown, line: string, signal: AbortSignal): Promise<{ commandId: string; result: { kind: string; text?: string } } | undefined>
+  }
 }
 
 export interface DshExtensionDeps {
@@ -144,6 +153,25 @@ export function onVendorRequest(
       fn: (rc: never) => unknown,
     ) => unknown
   }).onRequest(method, (params: unknown) => params, handler as (rc: never) => unknown)
+}
+
+function dshWatchHandlers(app: AgentApp): void {
+  onVendorRequest(app, 'dsh/sessions/watch', async ({ params, client }) => {
+    const sessionId = (params as { sessionId?: unknown }).sessionId
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      throw new RequestError(-32602, 'dsh/sessions/watch requires a sessionId')
+    }
+    watchSession(sessionId, client)
+    return { sessionId, watching: true }
+  })
+  onVendorRequest(app, 'dsh/sessions/unwatch', async ({ params, client }) => {
+    const sessionId = (params as { sessionId?: unknown }).sessionId
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      throw new RequestError(-32602, 'dsh/sessions/unwatch requires a sessionId')
+    }
+    unwatchSession(sessionId, client)
+    return { sessionId, watching: false }
+  })
 }
 
 /** Attach every read-only `dsh/*` request handler to an agent builder. */
@@ -263,5 +291,6 @@ export function attachDshExtensions(app: AgentApp, deps: DshExtensionDeps): Agen
         })),
       }
     })
+  dshWatchHandlers(app)
   return app
 }

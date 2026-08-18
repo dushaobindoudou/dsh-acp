@@ -13,13 +13,16 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { AcpSessionEntry } from './table.js'
 import { locationsOf, messageChunkId, toolContentOf, toolKindOf, toolTitleOf } from './translate.js'
+import { notifyWatchers } from './watch.js'
 
 export type EmitUpdate = (update: SessionUpdate) => void
 
 /** Attach all streaming listeners for one agent. Teardown is scope-owned. */
 export function attachEventBridge(agentCtx: Context, entry: AcpSessionEntry, emit: EmitUpdate): void {
-  agentCtx.on('session/event', (_session: unknown, event: SessionEvent) => {
+  agentCtx.on('session/event', (session: { id?: string }, event: SessionEvent) => {
     handleSessionEvent(entry, event, emit)
+    // Watchers (dsh/sessions/watch) observe the same translated frames.
+    if (session.id !== undefined) notifyWatchers(session.id, event)
   })
 
   agentCtx.on('tools/execute', (exec: ToolDispatchExecution, next: () => Promise<ToolExecutionResult>) => {
@@ -32,24 +35,29 @@ export function attachEventBridge(agentCtx: Context, entry: AcpSessionEntry, emi
   })
 }
 
-function handleSessionEvent(entry: AcpSessionEntry, event: SessionEvent, emit: EmitUpdate): void {
+/**
+ * Pure event -> ACP update translation. Exported so the plugin-fiber-level
+ * listener can serve watch requests for sessions created outside this plugin.
+ */
+export function translateSessionEvent(event: SessionEvent): SessionUpdate | null {
   switch (event.type) {
     case 'assistant/chunk': {
       const { turn, step, chunk } = event.data
       if (chunk.type === 'text-delta' && chunk.text.length > 0) {
-        emit({
+        return {
           sessionUpdate: 'agent_message_chunk',
           messageId: messageChunkId(turn, step),
           content: { type: 'text', text: chunk.text },
-        })
-      } else if (chunk.type === 'reasoning-delta' && chunk.text.length > 0) {
-        emit({
+        }
+      }
+      if (chunk.type === 'reasoning-delta' && chunk.text.length > 0) {
+        return {
           sessionUpdate: 'agent_thought_chunk',
           messageId: messageChunkId(turn, step),
           content: { type: 'text', text: chunk.text },
-        })
+        }
       }
-      break
+      return null
     }
     case 'tool/call': {
       const { callId, name, arguments: rawArguments } = event.data
@@ -59,7 +67,7 @@ function handleSessionEvent(entry: AcpSessionEntry, event: SessionEvent, emit: E
       } catch {
         parsed = {}
       }
-      emit({
+      return {
         sessionUpdate: 'tool_call',
         toolCallId: callId,
         title: toolTitleOf(name, parsed),
@@ -67,43 +75,45 @@ function handleSessionEvent(entry: AcpSessionEntry, event: SessionEvent, emit: E
         status: 'pending',
         locations: locationsOf(parsed),
         rawInput: parsed,
-      })
-      break
+      }
     }
     case 'tool/result': {
       const block = event.data.message.content[0]
-      if (block === undefined || block.type !== 'tool-result') break
+      if (block === undefined || block.type !== 'tool-result') return null
       const content = toolContentOf(block.content)
       if (event.data.error !== undefined) {
         const error = event.data.error
         content.push({ type: 'content', content: { type: 'text', text: `error ${error.name}: ${error.code}` } })
       }
-      emit({
+      return {
         sessionUpdate: 'tool_call_update',
         toolCallId: block.toolCallId,
         status: event.data.error !== undefined ? 'failed' : 'completed',
         content,
-      })
-      break
+      }
     }
     case 'todo/write': {
-      emit({
+      return {
         sessionUpdate: 'plan',
         entries: event.data.todos.map((todo) => ({
           content: todo.content,
           priority: 'medium' as const,
           status: todo.status,
         })),
-      })
-      break
-    }
-    case 'turn/end': {
-      entry.lastTurnEnd = event.data.reason
-      break
+      }
     }
     default:
-      break
+      return null
   }
+}
+
+function handleSessionEvent(entry: AcpSessionEntry, event: SessionEvent, emit: EmitUpdate): void {
+  if (event.type === 'turn/end') {
+    entry.lastTurnEnd = event.data.reason
+    return
+  }
+  const update = translateSessionEvent(event)
+  if (update !== null) emit(update)
 }
 
 /** Lazily-resolved connection context (set once AgentApp.connect returns). */

@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -238,8 +239,86 @@ try {
     'dsh/changed {sessions} pushed after the turn')
   PASS('dsh/changed notifications flow to the opted-in connection')
 
+  // ── standard ACP surface: capabilities, list, modes, commands, watch, images ─
+  const caps = initBody.result.agentCapabilities
+  assert.equal(caps.loadSession, true, 'loadSession capability advertised')
+  assert.equal(caps.promptCapabilities.image, true, 'image prompt capability advertised')
+  assert.ok(caps.sessionCapabilities.list && caps.sessionCapabilities.resume, 'list+resume capabilities advertised')
+  PASS('initialize advertises loadSession/image/list/resume capabilities')
+
+  const stdList = await withTimeout(send(connectionId, 'session/list', {}), 60_000, 'session/list')
+  const listed0 = stdList.sessions.find((candidate) => candidate.sessionId === session.sessionId)
+  assert.ok(listed0 !== undefined && listed0.cwd.length > 0, 'session/list (standard) includes the open session')
+  PASS(`session/list standard (${stdList.sessions.length} sessions, cwd ${listed0.cwd})`)
+
+  assert.ok(notifications.some((n) => n.method === 'session/update'
+    && n.params?.update?.sessionUpdate === 'available_commands_update'
+    && n.params.update.availableCommands.length > 0),
+    'available_commands_update advertised with commands')
+  PASS('available_commands_update carries the dsh command registry')
+
+  await withTimeout(send(connectionId, 'session/set_mode', { sessionId: session.sessionId, modeId: 'plan' }), 60_000, 'set_mode plan')
+  assert.ok(notifications.some((n) => n.params?.update?.sessionUpdate === 'current_mode_update'
+    && n.params.update.currentModeId === 'plan'), 'current_mode_update(plan) delivered')
+  await withTimeout(send(connectionId, 'session/set_mode', { sessionId: session.sessionId, modeId: 'default' }), 60_000, 'set_mode default')
+  PASS('session/set_mode <-> dsh plan mode with current_mode_update')
+
+  // watch: a THIRD connection subscribes to this session's live stream
+  const watchInit = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } })
+  const watchConn = watchInit.headers.get('acp-connection-id') ?? ''
+  const watchFile = `/tmp/dsh-acp-watch-${Date.now()}.log`
+  const watchCurl = spawn('curl', ['-sN', '--max-time', '150', `${base}/acp/stream?connection=${watchConn}`, '-o', watchFile])
+  await new Promise((r) => setTimeout(r, 800))
+  const watchPost = await post({ jsonrpc: '2.0', id: 500, method: 'dsh/sessions/watch', params: { sessionId: session.sessionId } }, watchConn)
+  assert.equal(watchPost.status, 202, 'watch request accepted')
+  let watchAck
+  for (let i = 0; i < 40 && watchAck === undefined; i++) {
+    await new Promise((r) => setTimeout(r, 500))
+    const frames = (existsSync(watchFile) ? readFileSync(watchFile, 'utf8') : '')
+      .split('\n').filter((line) => line.startsWith('data: '))
+    for (const line of frames) {
+      const frame = JSON.parse(line.slice(6))
+      if (frame.id === 500 && frame.result !== undefined) watchAck = frame.result
+    }
+  }
+  assert.equal(watchAck?.watching, true, 'watch acknowledged')
+  await withTimeout(send(connectionId, 'session/prompt', { sessionId: session.sessionId, prompt: [{ type: 'text', text: 'watched hello' }] }), 120_000, 'prompt #3 (watched)')
+  await new Promise((r) => setTimeout(r, 2000))
+  const watchedFrames = (await readFile(watchFile, 'utf8')).split('\n')
+    .filter((line) => line.startsWith('data: '))
+    .map((line) => JSON.parse(line.slice(6)))
+  const watchedChunks = watchedFrames.filter((f) => f.method === 'dsh/session/update'
+    && f.params?.update?.sessionUpdate === 'agent_message_chunk')
+  assert.ok(watchedChunks.length > 0, 'watcher received live message chunks')
+  watchCurl.kill('SIGKILL')
+  PASS(`dsh/sessions/watch streamed ${watchedChunks.length} chunks to a third connection`)
+
+  // image prompt: text + a real 1x1 PNG through the attachments service
+  const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  const imgPrompt = await withTimeout(send(connectionId, 'session/prompt', {
+    sessionId: session.sessionId,
+    prompt: [
+      { type: 'text', text: 'describe this image in one word' },
+      { type: 'image', data: PNG_1X1, mimeType: 'image/png' },
+    ],
+  }), 120_000, 'image prompt')
+  assert.equal(imgPrompt.stopReason, 'end_turn', 'image prompt turn completed')
+  PASS('image prompt block persisted via attachments and completed')
+
+  // standard session/load: close, then replay history as chunks
+  await withTimeout(send(connectionId, 'session/close', { sessionId: session.sessionId }), 60_000, 'close before load')
+  const loaded = await withTimeout(send(connectionId, 'session/load', { sessionId: session.sessionId, cwd: project, mcpServers: [] }), 120_000, 'session/load')
+  assert.deepEqual(loaded, {}, 'session/load response is empty per spec')
+  const replayUser = notifications.filter((n) => n.params?.update?.sessionUpdate === 'user_message_chunk' && String(n.params.update.messageId).startsWith('load-'))
+  const replayAgent = notifications.filter((n) => n.params?.update?.sessionUpdate === 'agent_message_chunk' && String(n.params.update.messageId).startsWith('load-'))
+  assert.ok(replayUser.length > 0 && replayAgent.length > 0, 'replayed both user and agent history')
+  PASS(`session/load replayed ${replayUser.length} user + ${replayAgent.length} agent chunks`)
+  await withTimeout(send(connectionId, 'session/close', { sessionId: session.sessionId }), 60_000, 'close after load')
+
   // resume: close, then reopen the SAME persisted session by id
-  await withTimeout(send(connectionId, 'session/close', { sessionId: session.sessionId }), 60_000, 'close for resume')
+  try {
+    await withTimeout(send(connectionId, 'session/close', { sessionId: session.sessionId }), 60_000, 'close for resume')
+  } catch { /* already closed by the load test below */ }
   const resumed = await withTimeout(send(connectionId, 'dsh/sessions/resume', { sessionId: session.sessionId }), 120_000, 'dsh/sessions/resume')
   assert.equal(resumed.sessionId, session.sessionId, 'resume reopens the persisted id')
   PASS('dsh/sessions/resume reopens the closed persisted session')

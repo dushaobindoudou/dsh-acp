@@ -18,6 +18,8 @@ export interface AcpSessionEntry {
   lastTurnEnd: TurnEndReason | undefined
   /** The ACP client (connection) that created this session; its notification channel. */
   client: AgentContext | undefined
+  /** Last advertised ACP mode id, for change detection. */
+  modeId?: 'default' | 'plan'
   /** Guard: one in-flight session/prompt at a time. */
   prompting: boolean
 }

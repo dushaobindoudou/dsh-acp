@@ -16,14 +16,19 @@ A [`dsh` profile bundle](https://github.com/deepseek-ai/deepseek-harness) that b
 
 | ACP method | Status |
 |---|---|
-| `initialize` | ✅ capabilities + agent info |
-| `session/new` | ✅ durable dsh agent (persisted under `$DSH_HOME/sessions`) |
-| `session/prompt` | ✅ streaming `agent_message_chunk` / `agent_thought_chunk` (reasoning), `plan` updates, full tool-call lifecycle, `{stopReason}`; failed turns reject with a JSON-RPC error carrying the cause |
+| `initialize` | ✅ full capability advertisement (`loadSession`, `promptCapabilities.image`, `sessionCapabilities.list/resume/close`) |
+| `session/new` | ✅ durable dsh agent + modes + slash-command advertisement |
+| `session/prompt` | ✅ streaming `agent_message_chunk` / `agent_thought_chunk` (reasoning), `plan` updates, full tool-call lifecycle, `{stopReason}`; failed turns reject with a JSON-RPC error carrying the cause; **image blocks** persist through the dsh attachments service; a single `/command` text block routes to the dsh command registry |
+| `session/list` | ✅ every persisted + live session (id, cwd, title) |
+| `session/resume` | ✅ reopen a persisted session without replay (standard form of the vendor method) |
+| `session/load` | ✅ reopen + replay the transcript as `user_message_chunk` / `agent_message_chunk` |
+| `session/set_mode` | ✅ `default` ⇄ `plan`, bridged to dsh plan mode, with `current_mode_update` push |
+| `available_commands_update` | ✅ the dsh command registry, advertised per session and refreshed each turn |
 | `session/request_permission` | ✅ dsh's approval seam bridged to the client (allow once/always, reject once/always) |
 | `session/cancel` | ✅ aborts the turn, prompt resolves `cancelled` |
 | `session/close` | ✅ cancels, flushes, disposes the agent |
 
-Roadmap: `session/load` replay, `session/resume`/`list`, modes + config options, slash commands, images, elicitation - see [the design doc](research/acp-dsh-design.md).
+Roadmap: `session/fork` and elicitation (both still UNSTABLE in the ACP SDK), `configOptions`, audio, document sync; the dsh↔dsh client half, discovery, and identity are planned as a **separate package** so this server stays single-purpose - see [the design doc](research/acp-dsh-design.md).
 
 ## The two final forms
 
@@ -129,9 +134,10 @@ any client:
 | `dsh/goals/list` | active goal per live agent (objective, phase, rounds) |
 | `dsh/skills/list` | installed skills (name, description, provider) |
 | `dsh/agents/tree` | live agents with parent/model/cwd (the subagent tree) |
+| `dsh/sessions/watch` / `unwatch` | subscribe to any session's translated live stream - `dsh/session/update` frames in the same SessionUpdate shapes the owner gets (orchestrators, dashboards, audit) |
 
 Push: `dsh/changed {topics}` notifications fire on turn ends, session
-lifecycle, and job changes. **Interop-safe by construction** - they are sent
+lifecycle, job changes, and agent-status transitions (throttled). **Interop-safe by construction** - they are sent
 only to connections that opted in via the schema-sanctioned extension point
 `clientCapabilities._meta['dsh/extensions']` (the `_meta` record is official
 ACP schema); standard clients like Zed see a fully standard server and are

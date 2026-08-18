@@ -137,8 +137,9 @@ export function promptToContent(prompt: readonly AcpContentBlock[]): ContentBloc
         break
       }
       case 'image':
-        // M3: persist via ctx.attachments into an ImageBlock.
-        parts.push('[image attachment received but unsupported in M1]')
+        // Handled by resolvePromptContent (needs the async attachments
+        // service); the sync text fold only sees the fallback marker.
+        parts.push('[image]')
         break
       case 'audio':
         parts.push('[audio attachment received but unsupported in M1]')
@@ -161,3 +162,26 @@ export function chunkKind(chunk: StreamChunk): 'message' | 'thought' | undefined
 export function messageChunkId(turn: number, step: number): string {
   return `m-${turn}-${step}`
 }
+
+
+/** An image block extracted from a prompt, pending attachment storage. */
+export interface PromptImage {
+  readonly kind: 'image'
+  readonly data: string
+  readonly mimeType: string
+}
+
+/** Whether this ACP prompt carries at least one image block. */
+export function promptHasImage(prompt: readonly AcpContentBlock[]): boolean {
+  return prompt.some((block) => block.type === 'image')
+}
+
+/** Extract every image block (base64 + mimeType) from a prompt. */
+export function promptImages(prompt: readonly AcpContentBlock[]): PromptImage[] {
+  return prompt.flatMap((block) =>
+    block.type === 'image' ? [{ kind: 'image' as const, data: block.data, mimeType: block.mimeType }] : [],
+  )
+}
+
+/** dsh image media types accepted by the version-one attachment path. */
+export const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const

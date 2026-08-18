@@ -18,6 +18,9 @@ import { Readable, Writable } from 'node:stream'
 import type { AgentConnection } from '@agentclientprotocol/sdk'
 import { buildAcpApp, connectStdio } from './connection.js'
 import { notifyDshChanged } from './dsh-extensions.js'
+import { translateSessionEvent } from './event-bridge.js'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { dispatchGlobalSessionEvent, setWatchTranslator } from './watch.js'
 import { AcpSessionTable } from './table.js'
 
 export const name = 'acp-server'
@@ -90,10 +93,20 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       goals: ctx.get('goals'),
       skills: ctx.get('skills'),
       agents: ctx.get('agents'),
+      planMode: ctx.get('planMode'),
+      commands: ctx.get('commands'),
     }),
+    attachments: () => ctx.get('attachments'),
     agentName: config.agentName,
     version: VERSION,
   })
+
+  // Watch support (dsh/sessions/watch): the pure translator is injected once
+  // per process, and the plugin-fiber listener covers sessions created
+  // outside this plugin (web GUI sessions in web-mounted mode); this
+  // plugin's own sessions stream through the per-agent event bridge.
+  setWatchTranslator((event) => translateSessionEvent(event as SessionEvent))
+  ctx.on('session/event', dispatchGlobalSessionEvent)
 
   // ── serve mode ────────────────────────────────────────────────────────────
   // `dsh --profile acp serve` publishes acpServeStartup from the serve-startup

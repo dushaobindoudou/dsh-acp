@@ -1,6 +1,6 @@
 {
   "name": "dsh-acp-server",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Agent Client Protocol (ACP) server plugin for the DeepSeek Harness (dsh) — drive dsh agents from Zed and any ACP client",
   "type": "module",
   "license": "MIT",

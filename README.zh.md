@@ -16,14 +16,19 @@
 
 | ACP 方法 | 状态 |
 |---|---|
-| `initialize` | ✅ 能力协商 + agent 信息 |
-| `session/new` | ✅ 持久 dsh agent（落盘于 `$DSH_HOME/sessions`） |
-| `session/prompt` | ✅ 流式 `agent_message_chunk` / `agent_thought_chunk`（推理）、`plan` 更新、完整工具调用生命周期、`{stopReason}`；失败的 turn 以携带原因的 JSON-RPC 错误拒绝 |
+| `initialize` | ✅ 完整能力声明（`loadSession`、`promptCapabilities.image`、`sessionCapabilities.list/resume/close`） |
+| `session/new` | ✅ 持久 dsh agent + 模式 + 斜杠命令广播 |
+| `session/prompt` | ✅ 流式 `agent_message_chunk` / `agent_thought_chunk`（推理）、`plan` 更新、完整工具调用生命周期、`{stopReason}`；失败的 turn 以携带原因的 JSON-RPC 错误拒绝；**图片块**经 dsh attachments 持久化；单条 `/命令` 文本路由到 dsh 命令注册表 |
+| `session/list` | ✅ 全部持久 + 活跃会话（id、cwd、标题） |
+| `session/resume` | ✅ 不回放地重开持久会话（vendor 方法的标准形态） |
+| `session/load` | ✅ 重开并以 `user_message_chunk` / `agent_message_chunk` 回放记录 |
+| `session/set_mode` | ✅ `default` ⇄ `plan`，桥接 dsh plan mode，推送 `current_mode_update` |
+| `available_commands_update` | ✅ dsh 命令注册表，按会话广播、每 turn 刷新 |
 | `session/request_permission` | ✅ dsh 审批桥接到客户端（允许/拒绝 一次/总是） |
 | `session/cancel` | ✅ 中止 turn，prompt 返回 `cancelled` |
 | `session/close` | ✅ 取消、落盘、释放 agent |
 
-路线图：`session/load` 回放、`session/resume`/`list`、模式与配置项、斜杠命令、图片、elicitation——见[设计文档](research/acp-dsh-design.md)。
+路线图：`session/fork` 与 elicitation（两者在 ACP SDK 中仍为 UNSTABLE）、`configOptions`、音频、文档同步；dsh↔dsh 客户端半边、发现与身份规划为**独立包**，保持本服务端单一职责——见[设计文档](research/acp-dsh-design.md)。
 
 ## 最终形态：两条命令
 
@@ -125,8 +130,9 @@ ACP v1 标准化的是"一段对话"，不是它周围的宿主。会话历史�
 | `dsh/goals/list` | 每个活跃代理的当前目标（objective、phase、轮次） |
 | `dsh/skills/list` | 已安装技能（name、description、provider） |
 | `dsh/agents/tree` | 活跃代理及其父/模型/cwd（子代理树） |
+| `dsh/sessions/watch` / `unwatch` | 订阅任意会话的翻译实时流——`dsh/session/update` 帧与属主收到的 SessionUpdate 同构（编排、仪表盘、审计） |
 
-推送：turn 结束、会话生命周期、任务变化时发 `dsh/changed {topics}` 通知。
+推送：turn 结束、会话生命周期、任务变化、代理状态迁移（节流）时发 `dsh/changed {topics}` 通知。
 **互操作性天然安全**--只发给通过 schema 官方扩展位
 `clientCapabilities._meta['dsh/extensions']` 声明启用的连接（`_meta` 记录是
 ACP 官方 schema 的一部分）；Zed 等标准客户端看到的是一个完全标准的服务端，
