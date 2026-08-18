@@ -17,6 +17,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable, Writable } from 'node:stream'
 import type { AgentConnection } from '@agentclientprotocol/sdk'
 import { buildAcpApp, connectStdio } from './connection.js'
+import { notifyDshChanged } from './dsh-extensions.js'
 import { AcpSessionTable } from './table.js'
 
 export const name = 'acp-server'
@@ -53,6 +54,11 @@ const WEB_GRACE_MS = 2_000
 
 const VERSION = '0.1.0'
 
+/** The slice of the jobs service the dsh/changed signal needs. */
+interface JobsSignal {
+  onJobsChanged(listener: () => void): () => void
+}
+
 export async function apply(ctx: Context, config: Config): Promise<void> {
   validateModelPin(config) // both-or-neither, fails the plugin loudly at load
   const exit = ctx.get('appExit') as AppExit | undefined
@@ -78,6 +84,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     flushOnTurnEnd: config.flushOnTurnEnd,
     table,
     log,
+    dshServices: () => ({
+      sessionQuery: ctx.get('sessionQuery'),
+      jobs: ctx.get('jobs'),
+      goals: ctx.get('goals'),
+      skills: ctx.get('skills'),
+      agents: ctx.get('agents'),
+    }),
     agentName: config.agentName,
     version: VERSION,
   })
@@ -137,7 +150,22 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // daemon boots exchange no ACP frames before the switch.
   ctx.on('internal/service', (name: string, value: unknown) => {
     if (name === 'webServer' && value !== undefined) mountWeb(value as WebServerLike)
+    if (name === 'jobs' && value !== undefined) attachJobsSignal(value as JobsSignal)
   })
+
+  // Push `dsh/changed {jobs}` to opted-in clients whenever the job registry
+  // moves (start/finish/kill). The jobs service may mount after this fiber in
+  // hand-installed compositions, hence the same late-attach path as webServer.
+  let disposeJobsSignal: (() => void) | undefined
+  function attachJobsSignal(jobs: JobsSignal): void {
+    if (disposeJobsSignal !== undefined) return
+    disposeJobsSignal = jobs.onJobsChanged(() => notifyDshChanged(['jobs']))
+  }
+  ctx.effect(() => () => {
+    disposeJobsSignal?.()
+  })
+  const jobsNow = ctx.get('jobs') as JobsSignal | undefined
+  if (jobsNow !== undefined) attachJobsSignal(jobsNow)
 
   const stdin = internals.stdin as unknown as Readable
   const stdout = internals.stdout as unknown as Writable & { isTTY?: boolean }

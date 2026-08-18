@@ -24,6 +24,13 @@ import type { TurnEndReason } from '@deepseek-ai/dsh-session'
 import type { AcpSessionTable, AcpSessionEntry } from './table.js'
 import { attachEventBridge, makeEmitter } from './event-bridge.js'
 import { attachPermBridge } from './perm-bridge.js'
+import {
+  attachDshExtensions,
+  notifyDshChanged,
+  onVendorRequest,
+  registerExtensionClient,
+  type DshServiceSnapshot,
+} from './dsh-extensions.js'
 import { promptToContent, stopReasonOf } from './translate.js'
 
 export interface AcpDeps {
@@ -37,23 +44,35 @@ export interface AcpDeps {
   readonly log: (message: string) => void
   readonly agentName: string
   readonly version: string
+  /** Lazy dsh services for the dsh/* vendor extensions (optional per composition). */
+  readonly dshServices: () => DshServiceSnapshot
 }
 
 /** Build the AgentApp with every M1 handler registered. */
 export function buildAcpApp(deps: AcpDeps): AgentApp {
   const log = deps.log
 
-  return agent({ name: 'dsh-acp' })
-    .onRequest('initialize', async () => ({
-      protocolVersion: PROTOCOL_VERSION,
-      agentInfo: { name: deps.agentName, version: deps.version },
-      agentCapabilities: {
-        loadSession: false,
-        promptCapabilities: {},
-        sessionCapabilities: { close: {} },
-      },
-      authMethods: [],
-    }))
+  const built = agent({ name: 'dsh-acp' })
+  built
+    .onRequest('initialize', async ({ params, client }) => {
+      // The schema-sanctioned extension point: _meta is an official
+      // record<string, unknown> on ClientCapabilities. Standard clients
+      // never set it and are never sent dsh/changed notifications.
+      const optedIn = registerExtensionClient(client, params as {
+        clientCapabilities?: { _meta?: Record<string, unknown> }
+      })
+      if (optedIn) log('dsh/* extensions enabled for this connection')
+      return {
+        protocolVersion: PROTOCOL_VERSION,
+        agentInfo: { name: deps.agentName, version: deps.version },
+        agentCapabilities: {
+          loadSession: false,
+          promptCapabilities: {},
+          sessionCapabilities: { close: {} },
+        },
+        authMethods: [],
+      }
+    })
     .onRequest('session/new', async ({ params, client }) => {
       if (typeof params.cwd !== 'string' || params.cwd.length === 0) {
         throw new RequestError(-32602, 'session/new requires an absolute cwd')
@@ -78,21 +97,11 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
         // another client's sessions.
         client,
       }
-      const emit = makeEmitter(sessionId, { context: () => entry.client }, log)
-      const { agent: created, dispose } = await deps.agents.create({
-        sessionId: SessionId(sessionId),
-        meta: { cwd: params.cwd },
-        agentOptions: { provider: selection.provider, model: selection.model },
-        setup: (agentCtx) => {
-          installModelSelection(agentCtx, { current: selection, assembled: undefined })
-          attachEventBridge(agentCtx, entry, emit)
-          attachPermBridge(agentCtx, sessionId, entry, deps.offerAlwaysPermissions, () => entry.client, log)
-        },
+      const { sessionId: returned } = await createOrResumeEntry(deps, entry, {
+        kind: 'create',
+        cwd: params.cwd,
       })
-      entry.agent = created
-      entry.dispose = dispose
-      deps.table.add(entry)
-      return { sessionId }
+      return { sessionId: returned }
     })
     .onRequest('session/prompt', async ({ params, signal }) => {
       const entry = requireEntry(deps, params.sessionId)
@@ -135,6 +144,9 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
       } finally {
         signal.removeEventListener('abort', onAbort)
         entry.prompting = false
+        // Host-plane dirty signal for opted-in clients: a finished turn can
+        // change the session list (title fold), goals, and the live tree.
+        notifyDshChanged(['sessions', 'goals', 'agents'])
       }
     })
     .onNotification('session/cancel', async ({ params }) => {
@@ -148,8 +160,79 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
       await entry.agent.whenIdle().catch(() => undefined)
       deps.table.remove(params.sessionId)
       await entry.dispose()
+      notifyDshChanged(['sessions', 'agents'])
       return {}
     })
+
+  onVendorRequest(built, 'dsh/sessions/resume', async ({ params, client }) => {
+    const target = (params as { sessionId?: unknown }).sessionId
+    if (typeof target !== 'string' || target.length === 0) {
+      throw new RequestError(-32602, 'dsh/sessions/resume requires a sessionId')
+    }
+    if (deps.table.get(target) !== undefined) {
+      throw new RequestError(-32602, `session ${target} is already open here; use it directly`)
+    }
+    const entry: AcpSessionEntry = {
+      sessionId: target,
+      agent: undefined as unknown as AcpSessionEntry['agent'],
+      dispose: async () => undefined,
+      cwd: '/',
+      lastTurnEnd: undefined,
+      prompting: false,
+      client,
+    }
+    const { sessionId: returned, cwd } = await createOrResumeEntry(deps, entry, {
+      kind: 'resume',
+      resumeSessionId: target,
+    })
+    return { sessionId: returned, cwd }
+  })
+
+  attachDshExtensions(built, {
+    services: deps.dshServices,
+    openDshSessionIds: () =>
+      new Set(deps.table.list().map((entry) => entry.agent.session.id as string)),
+    log,
+  })
+  return built
+}
+
+/**
+ * Shared creation path for session/new (fresh id) and dsh/sessions/resume
+ * (persisted id): bridges, model selection, and table registration are
+ * identical - only the agents-service call differs.
+ */
+async function createOrResumeEntry(
+  deps: AcpDeps,
+  entry: AcpSessionEntry,
+  mode: { kind: 'create'; cwd: string } | { kind: 'resume'; resumeSessionId: string },
+): Promise<{ sessionId: string; cwd: string }> {
+  const log = deps.log
+  const selection = deps.modelSelection()
+  const emit = makeEmitter(entry.sessionId, { context: () => entry.client }, log)
+  const setup = (agentCtx: CordisContext) => {
+    installModelSelection(agentCtx, { current: selection, assembled: undefined })
+    attachEventBridge(agentCtx, entry, emit)
+    attachPermBridge(agentCtx, entry.sessionId, entry, deps.offerAlwaysPermissions, () => entry.client, log)
+  }
+  const handle = mode.kind === 'create'
+    ? await deps.agents.create({
+        sessionId: SessionId(entry.sessionId),
+        meta: { cwd: mode.cwd },
+        agentOptions: { provider: selection.provider, model: selection.model },
+        setup,
+      })
+    : await deps.agents.resume({
+        resumeSessionId: SessionId(mode.resumeSessionId),
+        agentOptions: { provider: selection.provider, model: selection.model },
+        setup,
+      })
+  entry.agent = handle.agent
+  entry.dispose = handle.dispose
+  entry.cwd = (handle.agent.session.header?.cwd as string | undefined) ?? entry.cwd
+  deps.table.add(entry)
+  notifyDshChanged(['sessions', 'agents'])
+  return { sessionId: entry.agent.id as string, cwd: entry.cwd }
 }
 
 function requireEntry(deps: AcpDeps, sessionId: string): AcpSessionEntry {

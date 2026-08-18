@@ -144,7 +144,10 @@ try {
   assert.ok(html.includes('data-acp-webui') && html.includes('session/prompt'))
   PASS('built-in web UI served at GET /')
 
-  const initResponse = await post({ jsonrpc: '2.0', id: nextId++, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } })
+  const initResponse = await post({ jsonrpc: '2.0', id: nextId++, method: 'initialize', params: {
+    protocolVersion: 1,
+    clientCapabilities: { _meta: { 'dsh/extensions': { version: 1 } } },
+  } })
   assert.equal(initResponse.status, 200)
   const connectionId = initResponse.headers.get('acp-connection-id') ?? ''
   assert.match(connectionId, /^[0-9a-f-]{36}$/)
@@ -199,6 +202,47 @@ try {
   const completed = secondUpdates.find((u) => u.sessionUpdate === 'tool_call_update' && u.status === 'completed')
   assert.match(JSON.stringify(completed?.content ?? ''), /acp-e2e-ok/)
   PASS('prompt #2 full tool_call lifecycle over SSE')
+
+  // ── dsh/* vendor extensions ─────────────────────────────────────────────
+  const listed = await withTimeout(send(connectionId, 'dsh/sessions/list', {}), 60_000, 'dsh/sessions/list')
+  assert.ok(Array.isArray(listed.sessions))
+  const own = listed.sessions.find((candidate) => candidate.id === session.sessionId)
+  assert.ok(own !== undefined, 'session/new session appears in dsh/sessions/list')
+  assert.equal(own.acp, true)
+  assert.equal(own.persisted, true)
+  PASS(`dsh/sessions/list (${listed.sessions.length} sessions, own acp=true)`)
+
+  const read = await withTimeout(send(connectionId, 'dsh/sessions/read', { sessionId: session.sessionId }), 60_000, 'dsh/sessions/read')
+  assert.ok(Array.isArray(read.entries) && read.entries.length > 0, 'surface transcript is non-empty')
+  assert.ok(read.entries.every((entry) => typeof entry.text === 'string' && entry.text.length > 0))
+  PASS(`dsh/sessions/read (${read.entries.length} text entries)`)
+
+  const jobsListed = await withTimeout(send(connectionId, 'dsh/jobs/list', {}), 60_000, 'dsh/jobs/list')
+  assert.ok(Array.isArray(jobsListed.jobs))
+  PASS(`dsh/jobs/list (${jobsListed.jobs.length} jobs)`)
+
+  const goalsListed = await withTimeout(send(connectionId, 'dsh/goals/list', {}), 60_000, 'dsh/goals/list')
+  assert.ok(Array.isArray(goalsListed.goals))
+  PASS(`dsh/goals/list (${goalsListed.goals.length} goals)`)
+
+  const skillsListed = await withTimeout(send(connectionId, 'dsh/skills/list', {}), 60_000, 'dsh/skills/list')
+  assert.ok(Array.isArray(skillsListed.skills))
+  PASS(`dsh/skills/list (${skillsListed.skills.length} skills)`)
+
+  const tree = await withTimeout(send(connectionId, 'dsh/agents/tree', {}), 60_000, 'dsh/agents/tree')
+  assert.ok(Array.isArray(tree.agents))
+  assert.ok(tree.agents.some((node) => node.sessionId === session.sessionId && node.acp === true))
+  PASS(`dsh/agents/tree (${tree.agents.length} live agents, own session present)`)
+
+  assert.ok(notifications.some((n) => n.method === 'dsh/changed' && n.params?.topics?.includes('sessions')),
+    'dsh/changed {sessions} pushed after the turn')
+  PASS('dsh/changed notifications flow to the opted-in connection')
+
+  // resume: close, then reopen the SAME persisted session by id
+  await withTimeout(send(connectionId, 'session/close', { sessionId: session.sessionId }), 60_000, 'close for resume')
+  const resumed = await withTimeout(send(connectionId, 'dsh/sessions/resume', { sessionId: session.sessionId }), 120_000, 'dsh/sessions/resume')
+  assert.equal(resumed.sessionId, session.sessionId, 'resume reopens the persisted id')
+  PASS('dsh/sessions/resume reopens the closed persisted session')
 
   const del = await fetch(`${base}/acp`, { method: 'DELETE', headers: { 'acp-connection-id': connectionId } })
   assert.equal(del.status, 204)

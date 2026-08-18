@@ -111,6 +111,27 @@ http://127.0.0.1:7800 就是完整聊天界面（流式、思考、工具卡片�
 
 错误码：`401` Bearer token 缺失/错误 · `404` 未知连接 ID 或路由 · `400` 请求体无法解析。一个进程可挂多个客户端（每个一条 ACP 连接）。
 
+## dsh/* vendor 扩展（宿主平面）
+
+ACP v1 标准化的是"一段对话"，不是它周围的宿主。会话历史、任务、目标、技能、
+实时代理树以只读 vendor 方法暴露在 `dsh/` 命名空间下--内置 web UI 在用，任何客户端可用：
+
+| 方法 | 返回 |
+|---|---|
+| `dsh/sessions/list` | 全部持久+活跃会话（id、标题、创建时间、cwd、父会话、`acp` 标记） |
+| `dsh/sessions/read` | 单个会话的记录文本（`{seq, type, text}`） |
+| `dsh/sessions/resume` | 把持久会话重开为活跃 ACP 会话（带完整上下文） |
+| `dsh/jobs/list` | 后台任务（id、kind、label、状态、属主） |
+| `dsh/goals/list` | 每个活跃代理的当前目标（objective、phase、轮次） |
+| `dsh/skills/list` | 已安装技能（name、description、provider） |
+| `dsh/agents/tree` | 活跃代理及其父/模型/cwd（子代理树） |
+
+推送：turn 结束、会话生命周期、任务变化时发 `dsh/changed {topics}` 通知。
+**互操作性天然安全**--只发给通过 schema 官方扩展位
+`clientCapabilities._meta['dsh/extensions']` 声明启用的连接（`_meta` 记录是
+ACP 官方 schema 的一部分）；Zed 等标准客户端看到的是一个完全标准的服务端，
+永远不会收到 vendor 流量。缺少底层服务的组合里，各方法干净地返回 `-32601`。
+
 只用 curl 跑完整对话的可执行示例：[examples/curl-conversation.sh](examples/curl-conversation.sh)。
 
 ```bash

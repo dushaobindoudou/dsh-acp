@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-17
+
+### Added
+
+- Host plane over ACP via `dsh/*` vendor extensions: `dsh/sessions/list`,
+  `dsh/sessions/read` (transcript), `dsh/sessions/resume` (reopen a persisted
+  session as a live ACP session with full context), `dsh/jobs/list`,
+  `dsh/goals/list`, `dsh/skills/list`, `dsh/agents/tree` (live subagent tree),
+  plus `dsh/changed {topics}` push notifications. Opt-in through the
+  schema-sanctioned `clientCapabilities._meta['dsh/extensions']` extension
+  point - standard clients see a fully standard server; methods degrade to
+  -32601 in compositions without the underlying service.
+- Built-in web UI: host sidebar (sessions with titles + resume, jobs, goals,
+  skills, live agent tree) that refreshes on `dsh/changed`, next to the chat.
+
 ## [0.8.0] - 2026-08-17
 
 ### Added

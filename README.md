@@ -113,6 +113,31 @@ GUI's port.
 
 Errors: `401` bad/missing bearer token · `404` unknown connection id or route · `400` unparseable body. Several clients can attach to one process (one ACP connection each).
 
+## dsh/* vendor extensions (host plane)
+
+ACP v1 standardizes one conversation, not the host around it. Sessions history,
+jobs, goals, skills, and the live agent tree are exposed as read-only vendor
+methods under the `dsh/` namespace - consumed by the built-in web UI, usable by
+any client:
+
+| Method | Returns |
+|---|---|
+| `dsh/sessions/list` | every persisted + live session (id, title, createdAt, cwd, parentSession, `acp` flag) |
+| `dsh/sessions/read` | one session's transcript as `{seq, type, text}` entries |
+| `dsh/sessions/resume` | reopen a persisted session as a live ACP session (full context) |
+| `dsh/jobs/list` | background jobs (id, kind, label, status, owner) |
+| `dsh/goals/list` | active goal per live agent (objective, phase, rounds) |
+| `dsh/skills/list` | installed skills (name, description, provider) |
+| `dsh/agents/tree` | live agents with parent/model/cwd (the subagent tree) |
+
+Push: `dsh/changed {topics}` notifications fire on turn ends, session
+lifecycle, and job changes. **Interop-safe by construction** - they are sent
+only to connections that opted in via the schema-sanctioned extension point
+`clientCapabilities._meta['dsh/extensions']` (the `_meta` record is official
+ACP schema); standard clients like Zed see a fully standard server and are
+never contacted with vendor traffic. Each method degrades to a clean `-32601`
+in compositions that lack the underlying service.
+
 A complete, runnable conversation with nothing but curl: [examples/curl-conversation.sh](examples/curl-conversation.sh).
 
 ```bash

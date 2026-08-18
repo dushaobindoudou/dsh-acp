@@ -12,7 +12,8 @@ export interface AcpSessionEntry {
   agent: Agent
   /** Consumer capability from `ctx.agents.create()`; tears the agent down. */
   dispose: () => Promise<void>
-  readonly cwd: string
+  /** Working directory; resume refills it from the persisted header. */
+  cwd: string
   /** Reason of the most recent `turn/end` observed by the event bridge. */
   lastTurnEnd: TurnEndReason | undefined
   /** The ACP client (connection) that created this session; its notification channel. */
