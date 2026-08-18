@@ -1,0 +1,46 @@
+name: Bug report
+description: Something works incorrectly or crashes.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Also state what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. dsh plugin --profile acp add dsh-acp-server
+        2. dsh --profile acp serve --port 7800
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "Output of: node -v && dsh --version && dsh-acp-server --version 2>/dev/null || npm ls -g dsh-acp-server"
+      placeholder: "node v24.15.0 · dsh 0.1.0-rc.6 · dsh-acp-server 0.9.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      options:
+        - stdio (editor: Zed / Neovim / Emacs / ...)
+        - serve (HTTP+SSE)
+        - web-mounted (dsh web, shared port)
+        - not sure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: stderr of the serve/editor process, or the ACP frames involved. Redact tokens first.
+      render: shell

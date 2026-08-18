@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & discussions
+    url: https://github.com/dushaobindoudou/dsh-acp/discussions
+    about: Usage questions and design discussions before filing an issue.
