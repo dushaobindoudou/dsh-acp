@@ -11,6 +11,20 @@
 - id: hmr
   disabled: true
 
+# dsh >= 0.1.2-rc.1 ships its own ACP bundle (@deepseek-ai/dsh-acp-app) and
+# auto-initializes the `acp` profile template with it, so `dsh plugin
+# --profile acp add dsh-acp-server` lands a composition holding TWO ACP
+# servers on one stdio: both answer `initialize`, then requests split
+# between two session tables ("unknown session"). This bundle's layer is
+# applied after acp-app's, so it disables those rows and stays the single
+# ACP server. Both ids are absent on older dsh, where an unmatched patch id
+# is a silent no-op.
+- id: acp-app-startup
+  disabled: true
+
+- id: acp
+  disabled: true
+
 - id: system-prompt
   config:
     persona: >-

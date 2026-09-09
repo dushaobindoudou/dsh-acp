@@ -85,9 +85,13 @@ PASS(`web composition listening on :${port} (process ${child.pid})`)
 // ── same-port checks ───────────────────────────────────────────────────────
 const base = `http://127.0.0.1:${port}`
 try {
+  // dsh >= 0.1.2 puts the GUI behind a token trust fence, so an unauthenticated
+  // GET is 401 there and 200 on older dsh. Either answer proves the same thing
+  // this assertion is for: the web composition still owns `/` while ACP owns
+  // `/acp*` on the same port (a 404 would mean the GUI lost its route).
   const gui = await fetch(`${base}/`)
-  assert.equal(gui.status, 200)
-  PASS('GUI / -> 200 on the shared port')
+  assert.ok([200, 401].includes(gui.status), `GUI / answered ${gui.status}`)
+  PASS(`GUI / -> ${gui.status} on the shared port`)
 
   assert.equal(await (await fetch(`${base}/acp/healthz`)).text(), 'ok')
   PASS('ACP /acp/healthz -> ok on the SAME port')

@@ -78,9 +78,14 @@ PASS('process alive past the EOF grace window')
 
 const base = `http://127.0.0.1:${port}`
 try {
-  assert.equal(await (await fetch(`${base}/`)).status, 200)
+  // dsh >= 0.1.2 puts the GUI behind a token trust fence, so an unauthenticated
+  // GET is 401 there and 200 on older dsh. Either answer proves the same thing
+  // this assertion is for: the web composition still owns `/` while ACP owns
+  // `/acp*` on the same port (a 404 would mean the GUI lost its route).
+  const guiStatus = (await fetch(`${base}/`)).status
+  assert.ok([200, 401].includes(guiStatus), `GUI / answered ${guiStatus}`)
   assert.equal(await (await fetch(`${base}/acp/healthz`)).text(), 'ok')
-  PASS('GUI and ACP on the same port (late web-mounted path)')
+  PASS(`GUI (${guiStatus}) and ACP on the same port (late web-mounted path)`)
 
   const initResponse = await fetch(`${base}/acp`, {
     method: 'POST',

@@ -10,7 +10,7 @@
  *  - otherwise                     -> one reasoning delta + two text deltas
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { CallId, LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { Message } from '@deepseek-ai/dsh-llm'
 
@@ -88,7 +88,7 @@ async function* scriptFor(options: GenerateOptions): AsyncIterable<StreamChunk> 
   }
 
   if (lastUserText(options.messages).includes('CALL_TOOL')) {
-    const id = CallId('mock-call-1')
+    const id = ToolCallId('mock-call-1')
     const name = 'bash'
     const args = JSON.stringify({ command: 'echo acp-e2e-ok', description: 'e2e echo' })
     yield { type: 'block-start', index: 0, blockType: 'tool-call' }

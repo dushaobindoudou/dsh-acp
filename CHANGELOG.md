@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-09
+
+### Fixed
+
+- **Compatibility with dsh 0.1.2-rc.1.** dsh now ships its own ACP bundle
+  (`@deepseek-ai/dsh-acp-app`) and auto-initializes the `acp` profile
+  template with it, so `dsh plugin --profile acp add dsh-acp-server`
+  produced a composition holding TWO ACP servers on one stdio: both
+  answered `initialize`, then requests split across two session tables and
+  `session/prompt` failed with `unknown session`. This bundle's patch layer
+  now disables the `acp-app-startup` and `acp` rows, so it stays the single
+  ACP server. Both ids are absent on older dsh, where an unmatched patch id
+  is a silent no-op.
+- `todo/write` moved out of the core `SessionEventMap` into
+  `@deepseek-ai/dsh-tool-todo`; the event bridge now imports that module's
+  declaration so `plan` updates keep type-checking.
+- `CallId` was renamed to `ToolCallId` in `@deepseek-ai/dsh-llm` (test
+  mock-LLM adapter).
+
+### Changed
+
+- Dependency floors moved to `@deepseek-ai/dsh-*@^0.1.2-rc.1`, cordis
+  `^4.0.2`, cordis-plugin-loader `^1.0.3`, and schemastery `^3.18.2` (the
+  latter deduplicates the copy that made the config schema type unnameable
+  under pnpm).
+- The web-mounted e2e suites no longer assert `GET / -> 200`: dsh >= 0.1.2
+  puts its GUI behind a token trust fence and answers 401 unauthenticated.
+  The ACP routes are unaffected - `/acp`, `/acp/stream` and `/acp/healthz`
+  are still reachable without a token, verified end-to-end.
+
 ## [0.10.0] - 2026-08-18
 
 ### Added

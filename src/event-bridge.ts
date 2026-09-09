@@ -11,6 +11,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ToolDispatchExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+// `todo/write` is declared by the tool-todo plugin as a SessionEventMap
+// augmentation (it moved out of the core map in dsh 0.1.2); the type-only
+// import is what pulls that declaration into this compilation.
+import type {} from '@deepseek-ai/dsh-tool-todo'
 import type { AcpSessionEntry } from './table.js'
 import { locationsOf, messageChunkId, toolContentOf, toolKindOf, toolTitleOf } from './translate.js'
 import { notifyWatchers } from './watch.js'
