@@ -115,7 +115,14 @@ export interface DshServiceSnapshot {
   }
   readonly commands?: {
     list(agent: unknown): ReadonlyArray<{ name: string; description: string }>
-    execute(agent: unknown, line: string, signal: AbortSignal): Promise<{ commandId: string; result: { kind: string; text?: string } } | undefined>
+    /**
+     * dsh >= 0.1.2-rc.1 takes composer images between the line and the
+     * signal. The registry reads `signal.aborted` unguarded, so the old
+     * 3-argument form lands the signal in `images` and throws
+     * "Cannot read properties of undefined (reading 'aborted')" before the
+     * command handler ever runs.
+     */
+    execute(agent: unknown, line: string, images: readonly unknown[], signal: AbortSignal): Promise<{ commandId: string; result: { kind: string; text?: string } } | undefined>
   }
 }
 

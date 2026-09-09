@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-09-09
+
+### Fixed
+
+- `/command` prompts failed against dsh 0.1.2-rc.1 with `Cannot read
+  properties of undefined (reading 'aborted')`. `commands.execute()` gained an
+  `images` parameter between `line` and `signal`, and the registry reads
+  `signal.aborted` unguarded — the old 3-argument call put the signal in
+  `images` and left `signal` undefined, so the request died before the command
+  handler ever ran. 0.11.0's compatibility pass missed it because the local
+  `CommandsLike` interface is hand-written against a `ctx.get()` service, so
+  the arity change was invisible to the type checker, and the e2e suite only
+  asserted `available_commands_update` (advertisement), never an execution.
+  The serve suite now executes an advertised command end-to-end.
+
 ## [0.11.0] - 2026-09-09
 
 ### Fixed

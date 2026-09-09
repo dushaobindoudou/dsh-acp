@@ -257,6 +257,26 @@ try {
     'available_commands_update advertised with commands')
   PASS('available_commands_update carries the dsh command registry')
 
+  // EXECUTE one, not just advertise it: `commands.execute` grew an `images`
+  // parameter between the line and the signal in dsh 0.1.2-rc.1, and the
+  // registry reads `signal.aborted` unguarded — the old 3-argument call put
+  // the signal in `images` and every `/command` prompt died with
+  // "Cannot read properties of undefined (reading 'aborted')" while the
+  // advertisement above still looked perfectly healthy.
+  const advertised = notifications.find((n) => n.params?.update?.sessionUpdate === 'available_commands_update'
+    && n.params.update.availableCommands.length > 0).params.update.availableCommands
+  const runnable = advertised.find((c) => c.name === 'permission') ?? advertised[0]
+  const commandTurn = await withTimeout(
+    send(connectionId, 'session/prompt', {
+      sessionId: session.sessionId,
+      prompt: [{ type: 'text', text: `/${runnable.name}` }],
+    }),
+    120_000,
+    `/${runnable.name} prompt`,
+  )
+  assert.equal(commandTurn.stopReason, 'end_turn', `/${runnable.name} routed through the command registry`)
+  PASS(`slash command /${runnable.name} executed through the dsh command registry`)
+
   await withTimeout(send(connectionId, 'session/set_mode', { sessionId: session.sessionId, modeId: 'plan' }), 60_000, 'set_mode plan')
   assert.ok(notifications.some((n) => n.params?.update?.sessionUpdate === 'current_mode_update'
     && n.params.update.currentModeId === 'plan'), 'current_mode_update(plan) delivered')
