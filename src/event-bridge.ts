@@ -8,6 +8,7 @@
  */
 import type { AgentContext, SessionUpdate } from '@agentclientprotocol/sdk'
 import type { Context } from '@deepseek-ai/cordis'
+import type { AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
 import type { ToolDispatchExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -29,6 +30,40 @@ export function attachEventBridge(agentCtx: Context, entry: AcpSessionEntry, emi
     if (session.id !== undefined) notifyWatchers(session.id, event)
   })
 
+  // dsh 0.1.5 removed the `assistant/chunk` session event: token-level
+  // streaming now travels only on this process-local publication (the durable
+  // `assistant/message` event embeds the compacted stream instead). Chunk
+  // frames carry no turn/step, so track the position from the latest `start`
+  // frame of each attempt and reuse the 0.1.2 messageId scheme.
+  const streamPos = new Map<string, { turn: number; step: number }>()
+  agentCtx.on('agent/assistant-stream', (payload: { frame: AssistantStreamFrame }) => {
+    const frame = payload.frame
+    if (frame.type === 'start') {
+      streamPos.set(String(frame.attemptId), { turn: frame.turn, step: frame.step })
+      return
+    }
+    if (frame.type === 'end') {
+      streamPos.delete(String(frame.attemptId))
+      return
+    }
+    const pos = streamPos.get(String(frame.attemptId))
+    if (pos === undefined) return
+    const chunk = frame.chunk
+    if (chunk.type === 'text-delta' && chunk.text.length > 0) {
+      emit({
+        sessionUpdate: 'agent_message_chunk',
+        messageId: messageChunkId(pos.turn, pos.step),
+        content: { type: 'text', text: chunk.text },
+      })
+    } else if (chunk.type === 'reasoning-delta' && chunk.text.length > 0) {
+      emit({
+        sessionUpdate: 'agent_thought_chunk',
+        messageId: messageChunkId(pos.turn, pos.step),
+        content: { type: 'text', text: chunk.text },
+      })
+    }
+  })
+
   agentCtx.on('tools/execute', (exec: ToolDispatchExecution, next: () => Promise<ToolExecutionResult>) => {
     emit({
       sessionUpdate: 'tool_call_update',
@@ -40,28 +75,35 @@ export function attachEventBridge(agentCtx: Context, entry: AcpSessionEntry, emi
 }
 
 /**
- * Pure event -> ACP update translation. Exported so the plugin-fiber-level
- * listener can serve watch requests for sessions created outside this plugin.
+ * Pure event -> ACP update translation (first update only). Kept for the
+ * single-update API shape; watch delivery uses {@link translateSessionEventAll}.
  */
 export function translateSessionEvent(event: SessionEvent): SessionUpdate | null {
+  return translateSessionEventAll(event)[0] ?? null
+}
+
+/**
+ * Pure event -> ACP updates translation, expanding each session event into
+ * every ACP update it represents. Exported so the plugin-fiber-level listener
+ * can serve watch requests for sessions created outside this plugin.
+ */
+export function translateSessionEventAll(event: SessionEvent): SessionUpdate[] {
   switch (event.type) {
-    case 'assistant/chunk': {
-      const { turn, step, chunk } = event.data
-      if (chunk.type === 'text-delta' && chunk.text.length > 0) {
-        return {
-          sessionUpdate: 'agent_message_chunk',
-          messageId: messageChunkId(turn, step),
-          content: { type: 'text', text: chunk.text },
+    case 'assistant/message': {
+      // Whole-segment expansion for watch/replay delivery. The live agent
+      // path streams deltas via `agent/assistant-stream` and skips this event
+      // in handleSessionEvent, so nothing double-emits.
+      const updates: SessionUpdate[] = []
+      for (const block of event.data.message.content) {
+        if ((block.type === 'text' || block.type === 'reasoning') && block.text.length > 0) {
+          updates.push({
+            sessionUpdate: block.type === 'reasoning' ? 'agent_thought_chunk' : 'agent_message_chunk',
+            messageId: event.data.message.id,
+            content: { type: 'text', text: block.text },
+          })
         }
       }
-      if (chunk.type === 'reasoning-delta' && chunk.text.length > 0) {
-        return {
-          sessionUpdate: 'agent_thought_chunk',
-          messageId: messageChunkId(turn, step),
-          content: { type: 'text', text: chunk.text },
-        }
-      }
-      return null
+      return updates
     }
     case 'tool/call': {
       const { callId, name, arguments: rawArguments } = event.data
@@ -71,49 +113,62 @@ export function translateSessionEvent(event: SessionEvent): SessionUpdate | null
       } catch {
         parsed = {}
       }
-      return {
-        sessionUpdate: 'tool_call',
-        toolCallId: callId,
-        title: toolTitleOf(name, parsed),
-        kind: toolKindOf(name),
-        status: 'pending',
-        locations: locationsOf(parsed),
-        rawInput: parsed,
-      }
+      return [
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: callId,
+          title: toolTitleOf(name, parsed),
+          kind: toolKindOf(name),
+          status: 'pending',
+          locations: locationsOf(parsed),
+          rawInput: parsed,
+        },
+      ]
     }
     case 'tool/result': {
       const block = event.data.message.content[0]
-      if (block === undefined || block.type !== 'tool-result') return null
+      if (block === undefined || block.type !== 'tool-result') return []
       const content = toolContentOf(block.content)
       if (event.data.error !== undefined) {
         const error = event.data.error
         content.push({ type: 'content', content: { type: 'text', text: `error ${error.name}: ${error.code}` } })
       }
-      return {
-        sessionUpdate: 'tool_call_update',
-        toolCallId: block.toolCallId,
-        status: event.data.error !== undefined ? 'failed' : 'completed',
-        content,
-      }
+      return [
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: block.toolCallId,
+          status: event.data.error !== undefined ? 'failed' : 'completed',
+          content,
+        },
+      ]
     }
     case 'todo/write': {
-      return {
-        sessionUpdate: 'plan',
-        entries: event.data.todos.map((todo) => ({
-          content: todo.content,
-          priority: 'medium' as const,
-          status: todo.status,
-        })),
-      }
+      return [
+        {
+          sessionUpdate: 'plan',
+          entries: event.data.todos.map((todo) => ({
+            content: todo.content,
+            priority: 'medium' as const,
+            status: todo.status,
+          })),
+        },
+      ]
     }
     default:
-      return null
+      return []
   }
 }
 
 function handleSessionEvent(entry: AcpSessionEntry, event: SessionEvent, emit: EmitUpdate): void {
   if (event.type === 'turn/end') {
     entry.lastTurnEnd = event.data.reason
+    return
+  }
+  if (event.type === 'assistant/message') {
+    // 0.1.5: the committed message duplicates content the live
+    // `agent/assistant-stream` deltas already delivered; translating it here
+    // would double-emit. Watch/replay paths expand it instead (see
+    // translateSessionEventAll).
     return
   }
   const update = translateSessionEvent(event)

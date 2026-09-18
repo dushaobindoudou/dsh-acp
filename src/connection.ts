@@ -40,6 +40,14 @@ export interface AcpDeps {
   readonly agents: AgentRegistry
   /** Resolved once at boot: config pin or the profile's default selection. */
   readonly modelSelection: () => { provider: string; model: string }
+  /**
+   * Resolve whether image prompts are honestly supported right now: the
+   * attachments service accepts at least one ACP image media type AND the
+   * current default model route declares `image` input. Mirrors the official
+   * dsh-acp `supportsAcpImagePrompts`; over-advertising makes the client offer
+   * image uploads that then fail at the model-call stage.
+   */
+  readonly imageCapability: () => Promise<boolean>
   readonly offerAlwaysPermissions: boolean
   readonly flushOnTurnEnd: boolean
   readonly table: AcpSessionTable
@@ -101,7 +109,7 @@ export function buildAcpApp(deps: AcpDeps): AgentApp {
         agentCapabilities: {
           loadSession: true,
           promptCapabilities: {
-            image: deps.attachments() !== undefined,
+            image: await deps.imageCapability(),
             audio: false,
             embeddedContext: false,
           },

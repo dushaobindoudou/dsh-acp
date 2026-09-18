@@ -35,6 +35,10 @@ class MockAdapter extends LlmAdapter {
       name: 'Mock Model',
       context: { contextWindow: 32768 },
       defaultMaxTokens: 1024,
+      // The e2e exercises the image-prompt path; a real image-capable
+      // provider declares the modality, so the honest capability gate
+      // advertises it (mirrors official dsh-acp behavior).
+      inputModalities: ['text', 'image'],
     }
   }
 

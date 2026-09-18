@@ -17,10 +17,10 @@
 import type { AgentContext, SessionUpdate } from '@agentclientprotocol/sdk'
 import { notifyDshChanged } from './dsh-extensions.js'
 
-type Translator = (event: unknown) => SessionUpdate | null
+type Translator = (event: unknown) => SessionUpdate[]
 
 /** Injected at boot from event-bridge (keeps this module cycle-free). */
-let translate: Translator = () => null
+let translate: Translator = () => []
 export function setWatchTranslator(translator: Translator): void {
   translate = translator
 }
@@ -51,20 +51,22 @@ export function unwatchSession(sessionId: string, client: AgentContext | undefin
 export function notifyWatchers(sessionId: string, event: unknown): void {
   const set = watchers.get(sessionId)
   if (set === undefined || set.size === 0) return
-  let update: SessionUpdate | null
+  let updates: SessionUpdate[]
   try {
-    update = translate(event)
+    updates = translate(event)
   } catch {
     return
   }
-  if (update === null) return
-  for (const client of set) {
-    client.notify('dsh/session/update', { sessionId, update })
-      .catch(() => {
-        // Dead connection: stop delivering to it.
-        set.delete(client)
-      })
-      .catch(() => undefined)
+  if (updates.length === 0) return
+  for (const update of updates) {
+    for (const client of set) {
+      client.notify('dsh/session/update', { sessionId, update })
+        .catch(() => {
+          // Dead connection: stop delivering to it.
+          set.delete(client)
+        })
+        .catch(() => undefined)
+    }
   }
 }
 
@@ -92,6 +94,11 @@ function signalAgentsChanged(): void {
 export function dispatchGlobalSessionEvent(session: { id?: string } | undefined, event: unknown): void {
   const sessionId = session?.id
   if (sessionId === undefined) return
-  if ((event as { type?: string } | null)?.type === 'agent/status') signalAgentsChanged()
+  // Agent-tree refresh signal. NOTE: `agent/status` is a Scoped<Agent> event
+  // and never arrives on `session/event`, so drive the (throttled) signal off
+  // the session events that bound agent activity instead — a prompt opens a
+  // turn, turn/end settles it.
+  const type = (event as { type?: string } | null)?.type
+  if (type === 'session/prompt' || type === 'turn/end') signalAgentsChanged()
   notifyWatchers(sessionId, event)
 }

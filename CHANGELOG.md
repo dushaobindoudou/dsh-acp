@@ -4,6 +4,46 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-09-18
+
+dsh 0.1.5-rc.2 compatibility release. The 0.1.5 session-event changes removed
+`assistant/chunk`; this release restores live text streaming on the new event
+model and is verified by both e2e suites against a real dsh 0.1.5-rc.2.
+
+### Fixed
+
+- **Live streaming (P0)**: `assistant/chunk` no longer exists in dsh 0.1.5's
+  `SessionEventMap`, so the bridge's text branch never fired and ACP clients
+  received no thought/message chunks at all. Token-level streaming now rides
+  the process-local `agent/assistant-stream` publication (chunk frames carry
+  no turn/step, so the position is tracked from each attempt's `start` frame);
+  the durable `assistant/message` event is skipped on the live path to avoid
+  double emission and expanded only for watch/replay delivery.
+- **Image capability (P1)**: `promptCapabilities.image` is now computed the
+  way official dsh-acp does — attachments must accept an ACP image media type
+  AND the default model route must declare `image` input via
+  `llm.resolveModelInfo`. Previously the capability was advertised whenever
+  the attachments service existed, so non-image models failed at model-call
+  time after the client had already offered uploads.
+- **`dsh/changed {jobs}` in serve and web-mounted modes (P1)**: the jobs
+  signal attached only on the late-attach path, so the two main mount modes
+  never pushed job-registry updates. Attachment is hoisted above the per-mode
+  returns.
+- **`dsh/changed {agents}` signal (P1)**: `dispatchGlobalSessionEvent` gated
+  on `agent/status`, which never arrives on `session/event` — dead code since
+  0.10.0. The throttled signal now fires on `session/prompt` / `turn/end`,
+  which bound real agent activity.
+- `agentInfo.version` reads the package version instead of a hardcoded
+  `'0.1.0'`.
+- The mock LLM declares `inputModalities: ['text','image']` so the e2e image
+  path exercises the honest capability gate.
+
+### Changed
+
+- All `@deepseek-ai/dsh-*` dependencies moved to `^0.1.5-rc.2` (the dsh core
+  convention; the old `^0.1.2-rc.1` floor could never resolve to 0.1.5-rc.x
+  under npm prerelease semantics).
+
 ## [Unreleased]
 
 ## [0.11.1] - 2026-09-09

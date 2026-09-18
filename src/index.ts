@@ -18,10 +18,11 @@ import { Readable, Writable } from 'node:stream'
 import type { AgentConnection } from '@agentclientprotocol/sdk'
 import { buildAcpApp, connectStdio } from './connection.js'
 import { notifyDshChanged } from './dsh-extensions.js'
-import { translateSessionEvent } from './event-bridge.js'
+import { translateSessionEventAll } from './event-bridge.js'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { dispatchGlobalSessionEvent, setWatchTranslator } from './watch.js'
 import { AcpSessionTable } from './table.js'
+import { IMAGE_MEDIA_TYPES } from './translate.js'
 
 export const name = 'acp-server'
 
@@ -55,7 +56,11 @@ interface WebServerLike {
 /** How long stdin EOF waits for a late web composition before exiting. */
 const WEB_GRACE_MS = 2_000
 
-const VERSION = '0.1.0'
+// agentInfo.version tracks the real package version instead of a hardcoded
+// string that silently drifted (was '0.1.0' while the package is 0.11.x).
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
+const VERSION: string = require('../package.json').version
 
 /** The slice of the jobs service the dsh/changed signal needs. */
 interface JobsSignal {
@@ -83,6 +88,29 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     ctx,
     agents,
     modelSelection: () => modelSelectionOf(config, defaultModel.currentSelection()),
+    imageCapability: async () => {
+      // Mirror the official dsh-acp capability gate: attachments must accept an
+      // ACP image media type and the default model route must declare image
+      // input. Any doubt resolves to false — over-advertising turns into
+      // client-visible upload failures at the model-call stage.
+      type AttachmentsLike = { imageLimits?: { mediaTypes?: readonly string[] } }
+      const attachments = ctx.get('attachments') as AttachmentsLike | undefined
+      const mediaTypes = attachments?.imageLimits?.mediaTypes
+      if (mediaTypes === undefined || !mediaTypes.some((t) => (IMAGE_MEDIA_TYPES as readonly string[]).includes(t))) {
+        return false
+      }
+      const llm = ctx.get('llm') as
+        | { resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{ inputModalities?: readonly string[] }> }
+        | undefined
+      if (llm === undefined) return false
+      const { provider, model } = defaultModel.currentSelection()
+      try {
+        const info = await llm.resolveModelInfo(provider, model)
+        return info.inputModalities?.includes('image') === true
+      } catch {
+        return false
+      }
+    },
     offerAlwaysPermissions: config.offerAlwaysPermissions,
     flushOnTurnEnd: config.flushOnTurnEnd,
     table,
@@ -105,8 +133,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // per process, and the plugin-fiber listener covers sessions created
   // outside this plugin (web GUI sessions in web-mounted mode); this
   // plugin's own sessions stream through the per-agent event bridge.
-  setWatchTranslator((event) => translateSessionEvent(event as SessionEvent))
+  setWatchTranslator((event) => translateSessionEventAll(event as SessionEvent))
   ctx.on('session/event', dispatchGlobalSessionEvent)
+
+  // ── jobs signal (all mount paths) ─────────────────────────────────────────
+  // Push `dsh/changed {jobs}` to opted-in clients whenever the job registry
+  // moves (start/finish/kill). Hoisted above the per-mode returns so serve,
+  // web-mounted and stdio paths all get it; a late-arriving jobs service is
+  // still picked up through internal/service (late path below).
+  let disposeJobsSignal: (() => void) | undefined
+  function attachJobsSignal(jobs: JobsSignal): void {
+    if (disposeJobsSignal !== undefined) return
+    disposeJobsSignal = jobs.onJobsChanged(() => notifyDshChanged(['jobs']))
+  }
+  ctx.effect(() => () => {
+    disposeJobsSignal?.()
+  })
+  const jobsNow = ctx.get('jobs') as JobsSignal | undefined
+  if (jobsNow !== undefined) attachJobsSignal(jobsNow)
 
   // ── serve mode ────────────────────────────────────────────────────────────
   // `dsh --profile acp serve` publishes acpServeStartup from the serve-startup
@@ -161,24 +205,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // to service provisioning and mount as soon as it arrives; stdio (taken
   // below only when stdout is not a terminal) is handed back untouched -
   // daemon boots exchange no ACP frames before the switch.
+  // Push `dsh/changed {jobs}` late-attach: kept for hand-installed
+  // compositions where the jobs service provisions after this fiber.
   ctx.on('internal/service', (name: string, value: unknown) => {
     if (name === 'webServer' && value !== undefined) mountWeb(value as WebServerLike)
     if (name === 'jobs' && value !== undefined) attachJobsSignal(value as JobsSignal)
   })
-
-  // Push `dsh/changed {jobs}` to opted-in clients whenever the job registry
-  // moves (start/finish/kill). The jobs service may mount after this fiber in
-  // hand-installed compositions, hence the same late-attach path as webServer.
-  let disposeJobsSignal: (() => void) | undefined
-  function attachJobsSignal(jobs: JobsSignal): void {
-    if (disposeJobsSignal !== undefined) return
-    disposeJobsSignal = jobs.onJobsChanged(() => notifyDshChanged(['jobs']))
-  }
-  ctx.effect(() => () => {
-    disposeJobsSignal?.()
-  })
-  const jobsNow = ctx.get('jobs') as JobsSignal | undefined
-  if (jobsNow !== undefined) attachJobsSignal(jobsNow)
 
   const stdin = internals.stdin as unknown as Readable
   const stdout = internals.stdout as unknown as Writable & { isTTY?: boolean }
