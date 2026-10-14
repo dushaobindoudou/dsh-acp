@@ -9,7 +9,7 @@ shipped as a [dsh](https://github.com/deepseek-ai/deepseek-harness) profile bund
 pnpm install
 pnpm run build      # tsc -> lib/
 pnpm test           # unit tests
-pnpm run test:e2e   # four suites against real `dsh` boots: stdio, serve
+pnpm run test:e2e   # five suites against real `dsh` boots: stdio, CLI run, serve
                     # (HTTP+SSE), web-mounted (shared webServer port), and the
                     # bare-install grace path
 ```
@@ -47,5 +47,6 @@ per PR. Tests required for protocol behavior changes.
 
 ## Milestone plan
 
-See [research/acp-dsh-design.md §4](research/acp-dsh-design.md). M1 is complete;
-M2 (session load/replay, commands, modes) is next.
+See [research/acp-dsh-design.md §4](research/acp-dsh-design.md) for the original
+milestones and the README method table for current capabilities. Session
+load/replay, commands, modes, host control, and form questions are implemented.

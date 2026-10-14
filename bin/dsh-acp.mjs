@@ -3,6 +3,9 @@
  * dsh-acp-server: the standalone ACP entry point.
  *
  *   dsh-acp-server                    ACP on stdio (the editor command)
+ *   dsh-acp-server run "task" ...     one-shot CLI for scripts (see README)
+ *   dsh-acp-server catalog|call|stream|rpc ...
+ *                                     host control: every GUI action from a shell
  *   dsh-acp-server serve --port 7800  ACP on HTTP+SSE (remote)
  *   dsh-acp-server --patch extra.yml  any launcher flags pass through
  *
@@ -43,18 +46,38 @@ function bootstrap() {
   }
 }
 
-if (!existsSync(profileDir)) bootstrap()
+// Client subcommands of THIS package, not dsh launcher flags: each speaks
+// ACP to a running server (--url / DSH_ACP_URL) or to a private
+// `dsh --profile acp` child, and exits with its outcome.
+const CLIENT_COMMANDS = {
+  run: ['run.js', 'runMain'],
+  call: ['control.js', 'callMain'],
+  stream: ['control.js', 'streamMain'],
+  catalog: ['control.js', 'catalogMain'],
+  rpc: ['control.js', 'rpcMain'],
+}
+const subcommand = CLIENT_COMMANDS[process.argv[2] ?? '']
+const targetsRunningServer = process.argv.includes('--url') || (env.DSH_ACP_URL ?? '') !== ''
 
-const child = spawn(dsh, ['--profile', 'acp', ...process.argv.slice(2)], {
-  stdio: ['inherit', 'inherit', 'inherit'],
-  env,
-})
+// A client talking to a running server needs no local acp profile.
+if (!existsSync(profileDir) && !(subcommand !== undefined && targetsRunningServer)) bootstrap()
 
-child.on('error', (error) => {
-  process.stderr.write(`dsh-acp-server: failed to launch ${dsh}: ${String(error)}\n`)
-  process.exit(1)
-})
-child.on('exit', (code, signal) => {
-  if (signal !== null) process.exit(128 + 2)
-  process.exit(code ?? 0)
-})
+if (subcommand !== undefined) {
+  const [file, entry] = subcommand
+  const module = await import(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'cli', file))
+  process.exitCode = await module[entry](process.argv.slice(3))
+} else {
+  const child = spawn(dsh, ['--profile', 'acp', ...process.argv.slice(2)], {
+    stdio: ['inherit', 'inherit', 'inherit'],
+    env,
+  })
+
+  child.on('error', (error) => {
+    process.stderr.write(`dsh-acp-server: failed to launch ${dsh}: ${String(error)}\n`)
+    process.exit(1)
+  })
+  child.on('exit', (code, signal) => {
+    if (signal !== null) process.exit(128 + 2)
+    process.exit(code ?? 0)
+  })
+}

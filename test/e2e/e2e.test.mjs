@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -58,11 +58,20 @@ PASS('installed dsh-acp via `dsh plugin add` (bundles list reconciled)')
 
 // ── 3. boot dsh --profile acp with the mock overlay ───────────────────────
 const overlay = join(repoRoot, 'test', 'e2e', 'test-acp.overlay.yml')
+const profileDump = spawnSync(dshBin, ['--profile', 'acp', '--dump-config'], {
+  encoding: 'utf8', env: { ...process.env, DSH_HOME: home }, timeout: 30_000,
+})
+if (profileDump.status !== 0) FAIL('cannot inspect installed acp composition')
+// A globally installed older copy of this same package can shadow a local
+// link in dsh's bundle resolver. Supply only the missing host rows in that
+// environment; a normal install is tested from the bundle patch itself.
+const hostOverlay = profileDump.stdout.includes('id: workspace-controller')
+  ? [] : ['--patch', join(repoRoot, 'test', 'e2e', 'host-control.overlay.yml')]
 const stderrPath = join(tmp, 'dsh-stderr.log')
 const stderrFd = (await import('node:fs')).openSync(stderrPath, 'a')
 logPaths = [stderrPath]
 
-const child = spawn(dshBin, ['--profile', 'acp', '--patch', overlay], {
+const child = spawn(dshBin, ['--profile', 'acp', ...hostOverlay, '--patch', overlay], {
   cwd: project,
   env: { ...process.env, DSH_HOME: home },
   stdio: ['pipe', 'pipe', stderrFd],
@@ -88,7 +97,9 @@ child.stdout.on('data', (chunk) => {
     } catch {
       FAIL(`non-JSON line on stdout: ${line.slice(0, 200)}`)
     }
-    if (message.id !== undefined && pending.has(message.id)) {
+    if (message.method === 'session/request_permission' && message.id !== undefined) {
+      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { outcome: { outcome: 'selected', optionId: 'allow-once' } } })}\n`)
+    } else if (message.id !== undefined && pending.has(message.id)) {
       const { resolve, reject } = pending.get(message.id)
       pending.delete(message.id)
       if (message.error !== undefined) reject(new Error(`JSON-RPC ${message.error.code}: ${message.error.message}`))
@@ -105,6 +116,15 @@ const send = (method, params) =>
     pending.set(id, { resolve, reject })
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
   })
+// Same, but hands back the JSON-RPC id so the test can cancel it ($/cancel_request).
+const sendTracked = (method, params) => {
+  const id = nextId++
+  const response = new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject })
+  })
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+  return { id, response }
+}
 const notify = (method, params) => {
   child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`)
 }
@@ -119,29 +139,103 @@ const updatesFor = (sessionId) =>
 
 // ── 5. the M1 conversation ────────────────────────────────────────────────
 try {
-  const init = await withTimeout(send('initialize', { protocolVersion: 1, clientCapabilities: {} }), 60_000, 'initialize')
+  const init = await withTimeout(send('initialize', { protocolVersion: 1, clientCapabilities: { _meta: { 'dsh/extensions': true } } }), 60_000, 'initialize')
   assert.equal(init.protocolVersion, 1)
   // agentName comes from the overlay's acp-server config override -> proves
   // user-layer config overrides flow through the schema onto the wire.
   assert.equal(init.agentInfo.name, 'dsh-e2e')
   PASS('initialize handshake (config override: agentName=dsh-e2e)')
 
+  // The standalone ACP profile must mount the host controllers as well as
+  // Typert itself; a catalog without providers cannot create workspaces or
+  // edit settings, even though dsh/remote/invoke is registered.
+  const catalog = await withTimeout(send('dsh/remote/catalog', {}), 60_000, 'host catalog')
+  const endpoints = new Set(catalog.methods.map((method) => method.endpoint))
+  for (const endpoint of ['workspace/create', 'settings/describe', 'settings/update']) {
+    assert.ok(endpoints.has(endpoint), `${endpoint} mounted in the standalone ACP profile`)
+  }
+  const createdWorkspace = await withTimeout(send('dsh/remote/invoke', {
+    endpoint: 'workspace/create', args: { request: { path: project } },
+  }), 60_000, 'workspace/create')
+  assert.equal(createdWorkspace.result.workspace.path, realpathSync(project))
+  const streamId = 'workspace-follow-e2e'
+  const opened = await withTimeout(send('dsh/remote/stream', { endpoint: 'workspace/follow', streamId }), 60_000, 'workspace/follow')
+  assert.equal(opened.streamId, streamId)
+  const firstItem = await withTimeout((async () => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const item = notifications.find((message) => message.method === 'dsh/remote/item' && message.params.streamId === streamId)
+      if (item !== undefined) return item
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    throw new Error('workspace/follow did not deliver a baseline')
+  })(), 10_000, 'workspace/follow baseline')
+  assert.equal(firstItem.params.seq, 0)
+  assert.equal((await send('dsh/remote/cancel', { streamId })).cancelled, true)
+  const settings = await withTimeout(send('dsh/remote/invoke', { endpoint: 'settings/describe' }), 60_000, 'settings/describe')
+  assert.ok(settings.result.writable)
+  const setting = settings.result.namespaces.find((item) => item.ns === 'llm-deepseek') ?? settings.result.namespaces[0]
+  assert.ok(setting !== undefined, 'a settings namespace is available')
+  const updated = await withTimeout(send('dsh/remote/invoke', {
+    endpoint: 'settings/update', args: { ns: setting.ns, patch: {}, expectedRevision: setting.revision },
+  }), 60_000, 'settings/update')
+  assert.equal(updated.result.ns, setting.ns)
+  PASS('host control creates/follows a workspace and reads/updates settings')
+
   const session = await withTimeout(send('session/new', { cwd: project, mcpServers: [] }), 120_000, 'session/new')
   const sessionId = session.sessionId
   assert.match(sessionId, /^acp-/)
   PASS(`session/new -> ${sessionId}`)
+  const found = await withTimeout(send('dsh/sessions/search', { query: sessionId }), 60_000, 'sessions/search')
+  assert.ok(found.sessions.some((item) => item.id === sessionId), 'search finds a live session by id')
+  PASS('dsh/sessions/search finds a live session')
+  if (process.env.DSH_ACP_HOST_ONLY === '1') {
+    const secondSession = await withTimeout(send('session/new', { cwd: project, mcpServers: [] }), 60_000, 'second session/new')
+    const switched = await withTimeout(send('session/resume', { sessionId, cwd: project }), 60_000, 'session/resume')
+    assert.ok(switched.modes !== undefined, 'resume switches to the first session')
+    await send('session/close', { sessionId })
+    await send('session/close', { sessionId: secondSession.sessionId })
+    child.stdin.end()
+    const exitCode = await withTimeout(new Promise((resolve) => child.on('exit', resolve)), 60_000, 'host-only exit')
+    assert.equal(exitCode, 0)
+    process.stdout.write('HOST CONTROL E2E OK\n')
+    process.exit(0)
+  }
 
-  // 5a. plain streaming prompt
+  // 5a. configOptions are advertised on session/new: the model select over
+  // the registered provider, and no reasoning select (mock-1 has none).
+  const modelOption = (session.configOptions ?? []).find((o) => o.id === 'model')
+  assert.ok(modelOption !== undefined, 'model config option advertised')
+  assert.equal(modelOption.currentValue, 'mock/mock-1')
+  assert.equal(modelOption.category, 'model')
+  assert.equal((session.configOptions ?? []).some((o) => o.id === 'reasoning_effort'), false, 'no reasoning select on a route without efforts')
+  PASS('session/new advertises configOptions (model select, honest absence of reasoning_effort)')
+
+  // 5b. plain streaming prompt
   const first = await withTimeout(send('session/prompt', { sessionId, prompt: [{ type: 'text', text: 'Hello' }] }), 120_000, 'prompt #1')
   assert.equal(first.stopReason, 'end_turn')
+  // Token usage rides the prompt response (experimental ACP field).
+  assert.ok(first.usage !== undefined && first.usage.inputTokens > 0, `prompt response carries usage: ${JSON.stringify(first.usage)}`)
   const firstUpdates = updatesFor(sessionId)
   const thoughts = firstUpdates.filter((u) => u.sessionUpdate === 'agent_thought_chunk')
   const messages = firstUpdates.filter((u) => u.sessionUpdate === 'agent_message_chunk')
+  const usageUpdates = firstUpdates.filter((u) => u.sessionUpdate === 'usage_update')
   assert.equal(thoughts.length, 1, 'one reasoning chunk')
   assert.ok(messages.length >= 2, `streamed ${messages.length} message chunks`)
   assert.equal(messages[0].messageId, messages[1].messageId, 'stable messageId across chunks')
   assert.match(messages.map((m) => m.content.text).join(''), /Hello from dsh-acp mock/)
-  PASS('prompt #1 streamed thought + message chunks')
+  assert.ok(usageUpdates.length > 0, 'usage_update emitted from the reported token accounting')
+  assert.equal(usageUpdates[0].size, 32768, 'usage_update.size is the route context window')
+  assert.ok(usageUpdates[0].used > 0)
+  PASS('prompt #1 streamed thought + message chunks + usage')
+
+  const dispatched = await withTimeout(send('dsh/sessions/prompt', {
+    sessionId, prompt: 'Background dispatch', mode: 'queue', permissionPolicy: 'auto',
+  }), 60_000, 'sessions/prompt')
+  assert.equal(dispatched.accepted, true)
+  const settled = await withTimeout(send('dsh/sessions/wait', { sessionId, timeoutMs: 30_000 }), 60_000, 'sessions/wait')
+  assert.equal(settled.idle, true)
+  assert.equal(settled.stopReason, 'end_turn')
+  PASS('non-blocking master dispatch and wait completed the turn')
 
   // 5b. tool-call lifecycle prompt
   const second = await withTimeout(send('session/prompt', { sessionId, prompt: [{ type: 'text', text: 'CALL_TOOL now' }] }), 120_000, 'prompt #2')
@@ -162,10 +256,89 @@ try {
   assert.match(afterTool, /tool said:/, 'model answered with the tool result')
   PASS('prompt #2 exercised full tool_call lifecycle (pending -> in_progress -> completed)')
 
-  // 5c. close
+  // 5c. authenticate: advertised with empty authMethods; strict clients call
+  // it once after the handshake and must not get -32601.
+  const authed = await withTimeout(send('authenticate', { methodId: 'none' }), 60_000, 'authenticate')
+  assert.deepEqual(authed, {})
+  PASS('authenticate is a no-op success')
+
+  // 5d. session/set_config_option: switch the model; the reasoning select
+  // appears because the new route declares efforts, and an effort applies.
+  const switched = await withTimeout(
+    send('session/set_config_option', { sessionId, configId: 'model', value: 'mock/mock-2' }),
+    60_000,
+    'set_config_option model',
+  )
+  const reasoningOption = switched.configOptions.find((o) => o.id === 'reasoning_effort')
+  assert.ok(reasoningOption !== undefined, 'reasoning select appears for the reasoning-capable route')
+  assert.equal(reasoningOption.currentValue, 'low', 'the route default effort is reported')
+  assert.ok(switched.configOptions.find((o) => o.id === 'model').currentValue === 'mock/mock-2')
+  const effortSet = await withTimeout(
+    send('session/set_config_option', { sessionId, configId: 'reasoning_effort', value: 'high' }),
+    60_000,
+    'set_config_option reasoning_effort',
+  )
+  assert.equal(effortSet.configOptions.find((o) => o.id === 'reasoning_effort').currentValue, 'high')
+  // The override is live: the next prompt runs on the new route.
+  const onNewModel = await withTimeout(send('session/prompt', { sessionId, prompt: [{ type: 'text', text: 'Hello' }] }), 120_000, 'prompt after model switch')
+  assert.equal(onNewModel.stopReason, 'end_turn')
+  PASS('set_config_option switched model + reasoning effort live (config_option_update returned full state)')
+
+  // 5e. unknown values and unsupported knobs fail loudly instead of being
+  // silently ignored.
+  await assert.rejects(
+    withTimeout(send('session/set_config_option', { sessionId, configId: 'model', value: 'nope/nope' }), 60_000, 'bad model'),
+    /unknown provider: nope/,
+  )
+  await assert.rejects(
+    withTimeout(send('session/set_config_option', { sessionId, configId: 'reasoning_effort', value: 'turbo' }), 60_000, 'bad effort'),
+    /unknown reasoning effort: turbo/,
+  )
+  // Back to the plain route: it declares no efforts, so the knob must refuse.
+  await withTimeout(send('session/set_config_option', { sessionId, configId: 'model', value: 'mock/mock-1' }), 60_000, 'switch back')
+  await assert.rejects(
+    withTimeout(send('session/set_config_option', { sessionId, configId: 'reasoning_effort', value: 'high' }), 60_000, 'effort on plain route'),
+    /does not support reasoning efforts/,
+  )
+  await assert.rejects(
+    withTimeout(send('session/set_config_option', { sessionId, configId: 'unknown_knob', value: 'x' }), 60_000, 'unknown knob'),
+    /unknown config option/,
+  )
+  PASS('set_config_option rejections are precise (-32602 with cause)')
+
+  // 5f. protocol-level $/cancel_request: the SLOW prompt parks the mock
+  // stream mid-turn; cancelling the JSON-RPC request aborts the turn.
+  const tracked = sendTracked('session/prompt', { sessionId, prompt: [{ type: 'text', text: 'SLOW please' }] })
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: '$/cancel_request', params: { requestId: tracked.id } })}\n`)
+  const cancelled = await withTimeout(tracked.response, 30_000, 'cancelled prompt')
+  assert.equal(cancelled.stopReason, 'cancelled', `the cancelled turn reported: ${JSON.stringify(cancelled)}`)
+  PASS('$/cancel_request aborts the in-flight turn (stopReason cancelled)')
+
+  // 5g. session/delete refuses OPEN sessions...
+  await assert.rejects(
+    withTimeout(send('session/delete', { sessionId }), 60_000, 'delete open session'),
+    /is open here/,
+  )
+  PASS('session/delete refuses an open session')
+
+  // 5h. close
   const closed = await withTimeout(send('session/close', { sessionId }), 60_000, 'session/close')
   assert.deepEqual(closed, {})
   PASS('session/close')
+
+  // 5i. ...and deletes the persisted artifact after close.
+  const listed = await withTimeout(send('session/list', {}), 60_000, 'session/list before delete')
+  assert.ok(listed.sessions.some((s) => s.sessionId === sessionId), 'the closed session is still persisted')
+  const deleted = await withTimeout(send('session/delete', { sessionId }), 60_000, 'session/delete')
+  assert.deepEqual(deleted, {})
+  const relisted = await withTimeout(send('session/list', {}), 60_000, 'session/list after delete')
+  assert.equal(relisted.sessions.some((s) => s.sessionId === sessionId), false, 'the deleted session is gone from the corpus')
+  await assert.rejects(
+    withTimeout(send('session/delete', { sessionId }), 60_000, 'delete twice'),
+    /unknown session/,
+  )
+  PASS('session/delete removes the persisted artifact (idempotent refusal afterwards)')
 
   // 5d. clean exit on EOF
   child.stdin.end()

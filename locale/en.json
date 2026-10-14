@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "ACP Server",
+    "description": "Drive dsh agents over the Agent Client Protocol from Zed and any ACP client"
+  }
+}

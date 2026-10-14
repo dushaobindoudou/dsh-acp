@@ -6,7 +6,8 @@
  * process stays alive (the stdio branch never runs).
  */
 import assert from 'node:assert/strict'
-import { spawn, spawnSync } from 'node:child_process'
+import { execFile, spawn, spawnSync } from 'node:child_process'
+import { promisify } from 'node:util'
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -16,7 +17,9 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const dshBin = process.env.DSH_BIN ?? 'dsh'
 
 const PASS = (message) => process.stdout.write(`  ok - ${message}\n`)
+let testChild
 const FAIL = (message) => {
+  testChild?.kill('SIGTERM')
   process.stderr.write(`  not ok - ${message}\n`)
   for (const path of ['/tmp/dsh-acp-web-out.log', '/tmp/dsh-acp-web-err.log']) {
     if (existsSync(path)) process.stderr.write(`--- ${path} ---\n${readFileSync(path, 'utf8').slice(-3000)}\n`)
@@ -57,7 +60,7 @@ writeFileSync(patchPath, /\[\]\s*$/m.test(previous) ? previous.replace(/\[\]\s*$
 const overlay = join(repoRoot, 'test', 'e2e', 'test-acp.overlay.yml')
 const outLog = '/tmp/dsh-acp-web-out.log'
 const { openSync } = await import('node:fs')
-const child = spawn(dshBin, ['--profile', 'web', '--patch', overlay, '--port', '0'], {
+const child = testChild = spawn(dshBin, ['--profile', 'web', '--patch', overlay, '--port', '0', '--no-open'], {
   cwd: project,
   env: { ...process.env, DSH_HOME: home },
   stdio: ['ignore', openSync(outLog, 'w'), openSync('/tmp/dsh-acp-web-err.log', 'w')],
@@ -96,13 +99,36 @@ try {
   assert.equal(await (await fetch(`${base}/acp/healthz`)).text(), 'ok')
   PASS('ACP /acp/healthz -> ok on the SAME port')
 
+  const anonymous = await fetch(`${base}/acp`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } }),
+  })
+  assert.equal(anonymous.status, 401, 'anonymous ACP access follows the Web trust fence')
+  const bearer = await fetch(`${base}/acp`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer web-e2e-secret' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } }),
+  })
+  assert.equal(bearer.status, 200, 'configured ACP bearer token also authorizes API clients')
+  await fetch(`${base}/acp`, {
+    method: 'DELETE',
+    headers: { authorization: 'Bearer web-e2e-secret', 'acp-connection-id': bearer.headers.get('acp-connection-id') ?? '' },
+  })
+  const printedUrl = readFileSync(outLog, 'utf8').match(/http:\/\/127\.0\.0\.1:\d+\/\?token=[^\s]+/)?.[0]
+  assert.ok(printedUrl, 'Web launch token printed')
+  const exchange = await fetch(printedUrl, { redirect: 'manual' })
+  assert.equal(exchange.status, 303)
+  const cookie = exchange.headers.get('set-cookie')?.split(';')[0]
+  assert.ok(cookie, 'Web issued an authenticated cookie')
+  PASS('anonymous ACP rejected; Web cookie and configured bearer authorize ACP')
+
   let nextId = 1
   const pending = new Map()
   const notifications = []
 
   const initResponse = await fetch(`${base}/acp`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', cookie },
     body: JSON.stringify({ jsonrpc: '2.0', id: nextId++, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } }),
   })
   assert.equal(initResponse.status, 200)
@@ -112,7 +138,7 @@ try {
   assert.equal(initBody.result.agentInfo.name, 'dsh-e2e') // overlay config applied on top of the inject
   PASS('initialize -> 200 (agentName=dsh-e2e via overlay)')
 
-  const stream = await fetch(`${base}/acp/stream`, { headers: { 'acp-connection-id': connectionId } })
+  const stream = await fetch(`${base}/acp/stream`, { headers: { 'acp-connection-id': connectionId, cookie } })
   assert.match(stream.headers.get('content-type') ?? '', /text\/event-stream/)
   const reader = stream.body.getReader()
   const decoder = new TextDecoder()
@@ -147,10 +173,17 @@ try {
       pending.set(id, { resolve, reject })
       void fetch(`${base}/acp`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'acp-connection-id': connectionId },
+        headers: { 'content-type': 'application/json', 'acp-connection-id': connectionId, cookie },
         body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
       }).then((response) => assert.equal(response.status, 202))
     }), 120_000, method)
+
+  const hostCatalog = await send('dsh/remote/catalog', {})
+  for (const endpoint of ['session/search', 'workspace/create', 'settings/update']) {
+    assert.equal(hostCatalog.methods.find((method) => method.endpoint === endpoint)?.available, true,
+      `${endpoint} is live in the Web composition`)
+  }
+  PASS('Web host methods are reachable through the ACP Remote catalog')
 
   const session = await send('session/new', { cwd: project, mcpServers: [] })
   assert.match(session.sessionId, /^acp-/)
@@ -161,6 +194,23 @@ try {
   const updates = notifications.filter((n) => n.method === 'session/update').map((n) => n.params.update)
   assert.ok(updates.some((u) => u.sessionUpdate === 'agent_message_chunk'))
   PASS('prompt streamed message chunks over SSE')
+
+  // A real ask_user_question call must get its answer through the CLI's
+  // elicitation handler, without a browser answering the Web waterfall.
+  const execFileAsync = promisify(execFile)
+  for (const policy of ['auto', 'ask', 'deny']) {
+    const result = await execFileAsync(process.execPath, [join(repoRoot, 'bin', 'dsh-acp.mjs'),
+      'run', 'ASK_USER now', '--url', base, '--token', 'web-e2e-secret', '--cwd', project,
+      '--json', '--permission-policy', policy,
+    ], { cwd: project, env: { ...process.env, DSH_HOME: home }, timeout: 60_000 })
+    const answer = JSON.parse(result.stdout)
+    assert.equal(answer.stopReason, 'end_turn')
+    assert.ok(answer.toolCalls.some((call) => call.status === 'completed'))
+    if (policy === 'deny') assert.doesNotMatch(answer.text, /red \(Recommended\)/)
+    else assert.match(answer.text, /red \(Recommended\)/)
+    assert.match(result.stderr, policy === 'ask' ? /agent asked a question/ : /agent question/)
+  }
+  PASS('real ask_user_question crosses Web ACP elicitation and CLI auto/ask/deny policies')
 
   // The stdio branch never ran: the process must still be alive after the
   // whole conversation (a raced boot would have exited on stdin EOF).

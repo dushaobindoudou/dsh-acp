@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  accumulateUsage,
+  acpUsageOf,
   chunkKind,
+  contextUsageUpdateOf,
+  contextUsedOf,
+  emptyUsageTotals,
   locationsOf,
   messageChunkId,
   promptToContent,
@@ -76,4 +81,26 @@ test('chunkKind separates message, thought, and noise', () => {
 
 test('messageChunkId is stable per turn/step', () => {
   assert.equal(messageChunkId(1, 2), 'm-1-2')
+})
+
+test('usage mapping: accumulate, context footprint, ACP shape', () => {
+  const totals = emptyUsageTotals()
+  accumulateUsage(totals, { inputTokens: 10, outputTokens: 5, cacheReadTokens: 4, reasoningTokens: 3 })
+  accumulateUsage(totals, { inputTokens: 7, outputTokens: 2, totalTokens: 20, cacheWriteTokens: 1 })
+  // Call footprint: adapter total wins, otherwise disjoint counters sum.
+  assert.equal(contextUsedOf({ inputTokens: 1, outputTokens: 2, totalTokens: 9 }), 9)
+  assert.equal(contextUsedOf({ inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4 }), 10)
+  // First call had no adapter total: 10 + 4 + 0 + 5 = 19; second reported 20.
+  assert.deepEqual(acpUsageOf(totals), {
+    totalTokens: 39, inputTokens: 17, outputTokens: 7,
+    thoughtTokens: 3, cachedReadTokens: 4, cachedWriteTokens: 1,
+  })
+  assert.equal(acpUsageOf(undefined), undefined)
+  assert.equal(acpUsageOf(emptyUsageTotals()), undefined, 'no reported usage -> no usage field')
+})
+
+test('contextUsageUpdateOf needs a positive context window', () => {
+  assert.deepEqual(contextUsageUpdateOf({ inputTokens: 12, outputTokens: 3, totalTokens: 15 }, 32768), { used: 15, size: 32768 })
+  assert.equal(contextUsageUpdateOf({ inputTokens: 12, outputTokens: 3 }, undefined), undefined)
+  assert.equal(contextUsageUpdateOf({ inputTokens: 12, outputTokens: 3 }, 0), undefined)
 })

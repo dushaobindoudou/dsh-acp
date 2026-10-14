@@ -16,6 +16,7 @@
  */
 import type { AgentContext, SessionUpdate } from '@agentclientprotocol/sdk'
 import { notifyDshChanged } from './dsh-extensions.js'
+import { connectionKeyOf, onConnectionClosed, type ConnectionKey } from './connections.js'
 
 type Translator = (event: unknown) => SessionUpdate[]
 
@@ -25,25 +26,39 @@ export function setWatchTranslator(translator: Translator): void {
   translate = translator
 }
 
-const watchers = new Map<string, Set<AgentContext>>()
+/**
+ * Watchers per session, keyed by CONNECTION (each request hands the handler
+ * a fresh AgentContext, so the context object itself cannot be the key —
+ * an unwatch from a later request would never match its watch).
+ */
+const watchers = new Map<string, Map<ConnectionKey, AgentContext>>()
+
+onConnectionClosed((key) => {
+  for (const [sessionId, set] of watchers) {
+    set.delete(key)
+    if (set.size === 0) watchers.delete(sessionId)
+  }
+})
 
 export function watchSession(sessionId: string, client: AgentContext | undefined): boolean {
-  if (client === undefined) return false
+  const key = connectionKeyOf(client)
+  if (client === undefined || key === undefined) return false
   let set = watchers.get(sessionId)
   if (set === undefined) {
-    set = new Set()
+    set = new Map()
     watchers.set(sessionId, set)
   }
-  const isNew = !set.has(client)
-  set.add(client)
+  const isNew = !set.has(key)
+  set.set(key, client)
   return isNew
 }
 
 export function unwatchSession(sessionId: string, client: AgentContext | undefined): void {
-  if (client === undefined) return
+  const key = connectionKeyOf(client)
+  if (key === undefined) return
   const set = watchers.get(sessionId)
   if (set === undefined) return
-  set.delete(client)
+  set.delete(key)
   if (set.size === 0) watchers.delete(sessionId)
 }
 
@@ -59,11 +74,11 @@ export function notifyWatchers(sessionId: string, event: unknown): void {
   }
   if (updates.length === 0) return
   for (const update of updates) {
-    for (const client of set) {
+    for (const [key, client] of set) {
       client.notify('dsh/session/update', { sessionId, update })
         .catch(() => {
           // Dead connection: stop delivering to it.
-          set.delete(client)
+          set.delete(key)
         })
         .catch(() => undefined)
     }

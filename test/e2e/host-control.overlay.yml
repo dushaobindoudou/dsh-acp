@@ -1,0 +1,14 @@
+# Test-only fallback for a machine with a globally installed older
+# dsh-acp-server that shadows this checkout's bundle patch. CI normally
+# gets these rows from cordis.patch.yml itself.
+- insert:
+    - id: workspace
+      name: '@deepseek-ai/dsh-workspace'
+    - id: directory-picker
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: workspace-controller
+      name: '@deepseek-ai/dsh-api-workspace-controller'
+    - id: workspace-files
+      name: '@deepseek-ai/dsh-api-workspace-files'
+    - id: settings-controller
+      name: '@deepseek-ai/dsh-api-settings-controller'

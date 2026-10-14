@@ -25,12 +25,28 @@
 - id: acp
   disabled: true
 
+# dsh 0.2 split the deployment persona into prefix/suffix sections (the
+# single `persona` key is gone); mirror the official acp bundle's wording.
 - id: system-prompt
   config:
-    persona: >-
-      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+    personaPrefix: >-
+      You are a coding agent powered by the {{model}} model.
+    personaSuffix: Your working directory is {{cwd}}.
 
 - insert:
+    # Host controllers shared with the Web surface. The ACP Remote bridge
+    # needs real providers in this profile too: the base layer only supplies
+    # Typert and its gateway, not workspace or settings methods.
+    - id: workspace
+      name: '@deepseek-ai/dsh-workspace'
+    - id: directory-picker
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: workspace-controller
+      name: '@deepseek-ai/dsh-api-workspace-controller'
+    - id: workspace-files
+      name: '@deepseek-ai/dsh-api-workspace-files'
+    - id: settings-controller
+      name: '@deepseek-ai/dsh-api-settings-controller'
     - id: acp-serve-startup
       name: 'dsh-acp-server/serve-startup'
     - id: acp-server

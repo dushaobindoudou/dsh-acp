@@ -12,10 +12,23 @@
 - id: session-title-llm
   disabled: true
 
+# The tool lifecycle fixture only runs `echo`. DSH's nested confinement
+# runner is unavailable on some CI hosts, which otherwise makes the mock
+# model retry the same failed tool forever.
+- id: sandbox-policy
+  config:
+    mode: danger-full-access
+    workspaceRoot: !!js process.cwd()
+
+- id: approval
+  config:
+    policy: never
+
 - id: acp-server
   config:
     agentName: dsh-e2e
     offerAlwaysPermissions: false
+    token: web-e2e-secret
 
 - insert:
     - id: mock-llm

@@ -24,6 +24,14 @@ import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { ndJsonStream } from '@agentclientprotocol/sdk'
 import type { AgentApp, AgentConnection } from '@agentclientprotocol/sdk'
+import { trackConnection } from './connections.js'
+
+/**
+ * How long a connection survives without any attached SSE stream before it
+ * is closed (and its sessions released). EventSource clients reconnect
+ * within this window after a network blip; a killed client never does.
+ */
+const ORPHAN_GRACE_MS = 30_000
 
 export interface AcpHttpOptions {
   readonly token: string | undefined
@@ -52,6 +60,8 @@ export function createAcpRouter(app: AgentApp, opts: AcpHttpOptions, log: (messa
     readonly conn: AgentConnection
     receive(message: unknown): void
     attachStream(res: ServerResponse): void
+    /** A per-session SSE stream (SDK HTTP client shape): kept open, idle. */
+    attachSessionStream(res: ServerResponse): void
     close(): void
   }
 
@@ -90,6 +100,30 @@ export function createAcpRouter(app: AgentApp, opts: AcpHttpOptions, log: (messa
     })
 
     const conn = app.connect(ndJsonStream(output, input))
+    trackConnection(conn)
+    const sideStreams = new Set<ServerResponse>()
+    let orphanTimer: ReturnType<typeof setTimeout> | undefined
+    const armOrphanTimer = () => {
+      clearTimeout(orphanTimer)
+      orphanTimer = setTimeout(() => {
+        if (sse !== undefined && !sse.writableEnded && !sse.destroyed) return
+        log(`connection ${id.slice(0, 8)} lost its stream; closing it`)
+        connection.close()
+      }, ORPHAN_GRACE_MS)
+      orphanTimer.unref?.()
+    }
+    const openSse = (res: ServerResponse) => {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+        'x-acp-connection-id': id,
+      })
+      const heartbeat = setInterval(() => {
+        if (!res.writableEnded) res.write(': ping\n\n')
+      }, 15_000)
+      res.on('close', () => clearInterval(heartbeat))
+    }
     const connection: AcpHttpConnection = {
       id,
       conn,
@@ -97,19 +131,21 @@ export function createAcpRouter(app: AgentApp, opts: AcpHttpOptions, log: (messa
         inputController?.enqueue(encoder.encode(`${JSON.stringify(message)}\n`))
       },
       attachStream(res) {
+        clearTimeout(orphanTimer)
         sse = res
-        res.writeHead(200, {
-          'content-type': 'text/event-stream',
-          'cache-control': 'no-cache',
-          connection: 'keep-alive',
-          'x-acp-connection-id': id,
-        })
+        openSse(res)
         for (const frame of pending) res.write(`data: ${frame}\n\n`)
         pending.length = 0
-        const heartbeat = setInterval(() => {
-          if (!res.writableEnded) res.write(': ping\n\n')
-        }, 15_000)
-        res.on('close', () => clearInterval(heartbeat))
+        res.on('close', () => {
+          if (sse === res) armOrphanTimer()
+        })
+      },
+      attachSessionStream(res) {
+        // Every server message rides the connection stream; the session
+        // stream exists so the SDK client's per-session bookkeeping opens.
+        sideStreams.add(res)
+        openSse(res)
+        res.on('close', () => sideStreams.delete(res))
       },
       close() {
         try {
@@ -123,10 +159,15 @@ export function createAcpRouter(app: AgentApp, opts: AcpHttpOptions, log: (messa
           // Already closed.
         }
         if (sse !== undefined && !sse.writableEnded) sse.end()
+        for (const side of sideStreams) if (!side.writableEnded) side.end()
+        sideStreams.clear()
+        clearTimeout(orphanTimer)
         connections.delete(id)
       },
     }
     connections.set(id, connection)
+    // A client that initializes but never opens its stream is orphaned too.
+    armOrphanTimer()
     const initializeResult = new Promise<unknown>((resolve) => {
       initializeResolve = resolve
     })
@@ -188,14 +229,18 @@ export function createAcpRouter(app: AgentApp, opts: AcpHttpOptions, log: (messa
       return
     }
 
-    if (method === 'GET' && url.pathname === '/acp/stream') {
+    // `GET /acp/stream` is this server's original stream route; `GET /acp`
+    // (Accept: text/event-stream) is the SDK HTTP client's shape for the
+    // same connection stream, plus one per session (`Acp-Session-Id`).
+    if (method === 'GET' && (url.pathname === '/acp/stream' || url.pathname === '/acp')) {
       const connectionId = String(req.headers['acp-connection-id'] ?? url.searchParams.get('connection') ?? '')
       const connection = connections.get(connectionId)
       if (connection === undefined) {
         res.writeHead(404).end('unknown Acp-Connection-Id')
         return
       }
-      connection.attachStream(res)
+      if (url.pathname === '/acp' && req.headers['acp-session-id'] !== undefined) connection.attachSessionStream(res)
+      else connection.attachStream(res)
       return
     }
 

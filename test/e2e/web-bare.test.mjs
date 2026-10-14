@@ -16,7 +16,9 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const dshBin = process.env.DSH_BIN ?? 'dsh'
 
 const PASS = (message) => process.stdout.write(`  ok - ${message}\n`)
+let testChild
 const FAIL = (message) => {
+  testChild?.kill('SIGTERM')
   process.stderr.write(`  not ok - ${message}\n`)
   for (const path of ['/tmp/dsh-acp-bare-out.log', '/tmp/dsh-acp-bare-err.log']) {
     if (existsSync(path)) process.stderr.write(`--- ${path} ---\n${readFileSync(path, 'utf8').slice(-3000)}\n`)
@@ -44,7 +46,7 @@ if (install.status !== 0) {
 PASS('bare install into the web profile (no inject row)')
 
 const overlay = join(repoRoot, 'test', 'e2e', 'test-acp.overlay.yml')
-const child = spawn(dshBin, ['--profile', 'web', '--patch', overlay, '--port', '0'], {
+const child = testChild = spawn(dshBin, ['--profile', 'web', '--patch', overlay, '--port', '0', '--no-open'], {
   cwd: project,
   env: { ...process.env, DSH_HOME: home },
   // Daemon-style: stdin /dev/null (immediate EOF - the dangerous input),
@@ -89,7 +91,7 @@ try {
 
   const initResponse = await fetch(`${base}/acp`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', authorization: 'Bearer web-e2e-secret' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } }),
   })
   assert.equal(initResponse.status, 200)

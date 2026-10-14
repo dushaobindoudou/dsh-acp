@@ -16,19 +16,26 @@ A [`dsh` profile bundle](https://github.com/deepseek-ai/deepseek-harness) that b
 
 | ACP method | Status |
 |---|---|
-| `initialize` | ✅ full capability advertisement (`loadSession`, `promptCapabilities.image`, `sessionCapabilities.list/resume/close`) |
-| `session/new` | ✅ durable dsh agent + modes + slash-command advertisement |
-| `session/prompt` | ✅ streaming `agent_message_chunk` / `agent_thought_chunk` (reasoning), `plan` updates, full tool-call lifecycle, `{stopReason}`; failed turns reject with a JSON-RPC error carrying the cause; **image blocks** persist through the dsh attachments service; a single `/command` text block routes to the dsh command registry |
+| `initialize` | ✅ full capability advertisement (`loadSession`, `promptCapabilities.image`, `sessionCapabilities.list/resume/close/delete`) |
+| `authenticate` | ✅ no-op success (dsh credentials live outside ACP; empty `authMethods`) |
+| `session/new` | ✅ durable dsh agent + modes + slash-command advertisement + initial `configOptions` |
+| `session/prompt` | ✅ streaming `agent_message_chunk` / `agent_thought_chunk` (reasoning), `plan` updates, full tool-call lifecycle, `{stopReason, usage}`; failed turns reject with a JSON-RPC error carrying the cause; **image blocks** persist through the dsh attachments service; a single `/command` text block routes to the dsh command registry |
+| `session/set_config_option` | ✅ per-session `model` (`<provider>/<model>`) and `reasoning_effort` overrides; live effect on the next step; unsupported knobs/values refuse with precise `-32602`; `config_option_update` pushed on change |
+| `usage_update` / `usage` | ✅ context usage (`used`/`size`) pushed from token accounting; the prompt response sums the turn's tokens (experimental ACP field) |
 | `session/list` | ✅ every persisted + live session (id, cwd, title) |
 | `session/resume` | ✅ reopen a persisted session without replay (standard form of the vendor method) |
 | `session/load` | ✅ reopen + replay the transcript as `user_message_chunk` / `agent_message_chunk` |
 | `session/set_mode` | ✅ `default` ⇄ `plan`, bridged to dsh plan mode, with `current_mode_update` push |
 | `available_commands_update` | ✅ the dsh command registry, advertised per session and refreshed each turn |
 | `session/request_permission` | ✅ dsh's approval seam bridged to the client (allow once/always, reject once/always) |
+| `elicitation/create` | ✅ form-mode dsh user questions for clients declaring `elicitation.form`; one single-select question falls back to permission buttons; richer questions fall through to the host's answerer |
 | `session/cancel` | ✅ aborts the turn, prompt resolves `cancelled` |
+| `$/cancel_request` | ✅ handled by the ACP SDK: the request's abort signal cancels the in-flight dsh turn |
 | `session/close` | ✅ cancels, flushes, disposes the agent |
+| `session/delete` | ✅ removes a persisted session's artifact; refuses open/live/foreign-claimed sessions with a clear error |
+| `fs/read_text_file`, `fs/write_text_file` | ☑️ intentionally not called — dsh tools read/write the host filesystem in-process, so the server never round-trips file access through the client (clients that declare the fs capability will simply never see these requests) |
 
-Roadmap: `session/fork` and elicitation (both still UNSTABLE in the ACP SDK), `configOptions`, audio, document sync; the dsh↔dsh client half, discovery, and identity are planned as a **separate package** so this server stays single-purpose - see [the design doc](research/acp-dsh-design.md).
+Roadmap: `session/fork` (still UNSTABLE in the ACP SDK), URL-mode elicitation, audio, document sync (`document/didOpen` et al. — this server is deliberately single-conversation); the dsh↔dsh client half, discovery, and identity are planned as a **separate package** - see [the design doc](research/acp-dsh-design.md).
 
 ## The two final forms
 
@@ -66,6 +73,27 @@ Prefer to keep `web` untouched? `node bin/setup-webacp.mjs --clone webacp` gives
 The script writes a row-level `inject: [agents, agentDefaultModel, webServer]` so Cordis starts the acp-server fiber only after the shared `webServer` service exists - the stdio transport can never race a web boot. A hand install without that row is safe too: the plugin web-mounts late via service provisioning (terminal boots skip stdio entirely; daemon boots get an EOF grace window). The full row is documented in [examples/patches/web-mounted.yml](examples/patches/web-mounted.yml).
 
 Why a bin instead of the literal `dsh acp-server`: the dsh launcher hardcodes its app subcommands (`web`, `plugin`) and parses argv before any plugin loads, so a bundle cannot register one; the wrapper is the same single-command shape.
+
+## Drive dsh from a script (`run`)
+
+`dsh-acp-server run` is a one-shot CLI for **external agents and orchestrators**: it spawns the real `dsh --profile acp`, speaks ACP to it through the same SDK every other client uses, prints the answer, and exits. No ACP client implementation required:
+
+```bash
+dsh-acp-server run "fix the failing tests and summarize the cause" \
+  --cwd /path/to/workspace \
+  --json                                  # one JSON object on stdout
+  --session acp-69041a38-...              # resume a persisted session (no cold plugin-tree start)
+  --model liepin/glm-5-3                  # temporary <provider>/<model> override
+  --timeout 600                           # cancel the turn after 600s
+  --permission-policy auto                # auto | ask | deny
+  --attach /tmp/screenshot.png            # repeatable; images ride image blocks
+```
+
+- **Default output** is the final assistant answer as plain text on stdout; progress (tool calls, permission notes) goes to stderr. `--json` prints exactly one object: `{sessionId, stopReason, text, toolCalls: [{title, status}], usage?, error?}`.
+- **Exit codes**: `0` done · `1` error · `2` timeout (the turn was cancelled) · `3` cancelled · `4` a permission request was denied. A script branches on the code, never on parsing prose.
+- `--session <id>` resumes a persisted session (`dsh-acp-server run ... --session "$(cat last-session)"` keeps one conversation across invocations); without it each run creates a fresh session.
+- `--model <provider>/<model>` maps to `session/set_config_option` and overrides the profile default for that session only; your profile's `agent-default-model` is untouched.
+- `--permission-policy auto` approves every permission request (allow once), `deny` rejects them (exit `4` if any was rejected), `ask` (default) prompts on the terminal — and fails closed (deny) when stdin is not a TTY.
 
 ## Install
 
@@ -116,25 +144,46 @@ GUI's port.
 | `DELETE /acp` | close the connection → `204` |
 | `GET /acp/healthz` | liveness probe (no auth; serve mode also answers `/healthz`) |
 
-Errors: `401` bad/missing bearer token · `404` unknown connection id or route · `400` unparseable body. Several clients can attach to one process (one ACP connection each).
+Errors: `401` bad/missing credentials · `404` unknown connection id or route · `400` unparseable body. Several clients can attach to one process (one ACP connection each).
 
 ## dsh/* vendor extensions (host plane)
 
 ACP v1 standardizes one conversation, not the host around it. Sessions history,
-jobs, goals, skills, and the live agent tree are exposed as read-only vendor
-methods under the `dsh/` namespace - consumed by the built-in web UI, usable by
-any client:
+jobs, goals, skills, and the live agent tree are exposed as vendor methods
+under the `dsh/` namespace. Host writes and orchestration are described below:
 
 | Method | Returns |
 |---|---|
 | `dsh/sessions/list` | every persisted + live session (id, title, createdAt, cwd, parentSession, `acp` flag) |
 | `dsh/sessions/read` | one session's transcript as `{seq, type, text}` entries |
+| `dsh/sessions/search` | find sessions by ID, title, or cwd (`{query, limit?}`) |
 | `dsh/sessions/resume` | reopen a persisted session as a live ACP session (full context) |
 | `dsh/jobs/list` | background jobs (id, kind, label, status, owner) |
 | `dsh/goals/list` | active goal per live agent (objective, phase, rounds) |
 | `dsh/skills/list` | installed skills (name, description, provider) |
 | `dsh/agents/tree` | live agents with parent/model/cwd (the subagent tree) |
 | `dsh/sessions/watch` / `unwatch` | subscribe to any session's translated live stream - `dsh/session/update` frames in the same SessionUpdate shapes the owner gets (orchestrators, dashboards, audit) |
+
+### Orchestration and host control
+
+Use `session/list` and `dsh/sessions/search` to locate work, then `session/resume` or `session/load` to switch to it. `dsh/sessions/prompt` queues or steers a turn and returns immediately; `dsh/sessions/wait`, `read`, and `watch` follow its outcome. `dsh/sessions/cancel` cancels a running turn, and `configure` sets its permission policy. `session/new` accepts `_meta['dsh/agentPreset']` and `_meta['dsh/permissionPolicy']` before the first turn.
+
+`dsh/remote/catalog` exposes the live Typert method catalog, parameter schemas, and an `available` flag. `dsh/remote/invoke` calls a unary method with `{endpoint, args}`. `dsh/remote/stream` opens a stream that sends `dsh/remote/item` and `dsh/remote/end`; `dsh/remote/cancel` stops it. The standalone ACP profile mounts workspace, directory browser, workspace files, and settings controllers. When mounted into `dsh web`, the bridge also sees that composition's other host methods. For example, `workspace/create` takes `{"endpoint":"workspace/create","args":{"request":{"path":"/absolute/project"}}}`. Inspect `settings/describe` and the catalog schema before calling `settings/update`. These calls run as the local DSH operator. Web-mounted ACP accepts a DSH Web login cookie or a configured ACP bearer token for scripts; standalone `serve` takes `--token`.
+
+The shell client uses the same ACP methods:
+
+```bash
+dsh-acp-server catalog workspace --url http://127.0.0.1:3080 --token "$DSH_ACP_TOKEN"
+dsh-acp-server call workspace/create '{"request":{"path":"/absolute/project"}}' --url http://127.0.0.1:3080 --token "$DSH_ACP_TOKEN"
+dsh-acp-server rpc dsh/sessions/search '{"query":"project"}' --url http://127.0.0.1:3080 --token "$DSH_ACP_TOKEN"
+dsh-acp-server stream workspace/follow --limit 1 --url http://127.0.0.1:3080 --token "$DSH_ACP_TOKEN"
+dsh-acp-server run "continue this task" --session <session-id> --json --url http://127.0.0.1:3080 --token "$DSH_ACP_TOKEN"
+dsh-acp-server run "long task" --detach --permission-policy auto --url http://127.0.0.1:3080 --token "$DSH_ACP_TOKEN"
+```
+
+`--url` and `--token` also read `DSH_ACP_URL` and `DSH_ACP_TOKEN`. Without a URL the CLI starts a private stdio server. `--detach` requires a running server and prints the session ID immediately; use `rpc dsh/sessions/wait '{"sessionId":"..."}'` and `rpc dsh/sessions/read` to follow the result. `--preset` selects the agent preset when creating a session. `call`, `stream`, and `rpc` accept inline JSON, `@file.json`, or `-` for stdin. Stream item limits must be positive integers; timeout values must be positive finite seconds. Stream timeout exits with code 2.
+
+The `run` client handles form questions: `auto` selects the first offered option, `deny` declines, and `ask` prompts in a terminal. With non-TTY stdin, `ask` answers questions with the first options; permission requests are denied. Detached tasks use the server's configured policy. The question tool must be present in the agent's composition.
 
 Push: `dsh/changed {topics}` notifications fire on turn ends, session
 lifecycle, job changes, and agent-status transitions (throttled). **Interop-safe by construction** - they are sent
@@ -159,9 +208,11 @@ All knobs have schema defaults; override only the keys you want in your profile 
 | `agentName` | string | `dsh` | `initialize.agentInfo.name` shown to clients |
 | `provider` | string | - | pin the model for ACP sessions (must be set **with** `model`) |
 | `model` | string | - | pin the model for ACP sessions (must be set **with** `provider`) |
-| `token` | string | - | require `authorization: Bearer <token>` on the HTTP transport (web-mounted mode; standalone `serve` takes `--token` on its command line) |
+| `token` | string | - | extra ACP bearer credential for web-mounted mode; otherwise DSH Web's login cookie is required. Standalone `serve` takes `--token` |
 | `offerAlwaysPermissions` | boolean | `true` | include `allow_always` / `reject_always` options in permission requests |
 | `flushOnTurnEnd` | boolean | `true` | flush session persistence after every completed turn |
+| `hostControl` | boolean | `true` | expose `dsh/remote/*` host methods |
+| `hostControlDeny` | string[] | `[]` | block endpoints such as `settings/*`, `workspace/delete`, or `*` |
 
 ```yaml
 - id: acp-server
@@ -211,7 +262,7 @@ ACP client (Zed / curl / acp-chat)
       └─ dsh-base: tools, sandbox, persistence, settings
 ```
 
-Source layout: `src/connection.ts` (method handlers) · `translate.ts` (pure wire mappings, unit-tested) · `event-bridge.ts` / `perm-bridge.ts` (dsh ⇄ ACP seams) · `http-transport.ts` (shared HTTP router) · `serve-startup.ts` (the `serve` subcommand) · `config.ts` (schema) · `table.ts` (session registry).
+Source layout: `src/connection.ts` (method handlers) · `translate.ts` / `config-options.ts` (pure wire mappings, unit-tested) · `event-bridge.ts` / `perm-bridge.ts` (dsh ⇄ ACP seams) · `session-delete.ts` (guarded persisted-session cleanup) · `cli/run.ts` (the one-shot CLI; `cli/run-core.ts` is its pure mapping layer) · `http-transport.ts` (shared HTTP router) · `serve-startup.ts` (the `serve` subcommand) · `config.ts` (schema) · `table.ts` (session registry).
 
 Full research behind every mapping: [`research/`](research/) - [ACP protocol](research/acp-protocol.md), [DSH architecture](research/dsh-architecture.md), [prior art](research/acp-implementations.md), [design blueprint](research/acp-dsh-design.md).
 
@@ -224,7 +275,7 @@ pnpm test          # unit tests (pure translation + config layers)
 
 # end-to-end: boots the REAL dsh in a throwaway $DSH_HOME with a
 # deterministic mock LLM, and asserts the full wire behavior:
-pnpm run test:e2e  # stdio · serve (HTTP+SSE) · web-mounted · bare-install grace
+pnpm run test:e2e  # stdio · run CLI · serve (HTTP+SSE) · web-mounted · bare-install grace
 ```
 
 The e2e suites are the fastest way to iterate on protocol behavior - each drives a complete conversation (text prompt, tool-call lifecycle, teardown) over its transport. Set `DSH_ACP_PKG` (repo path by default, `./dsh-acp-server-*.tgz`, or an npm spec) to pick the install source.

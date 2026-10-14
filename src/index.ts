@@ -36,6 +36,7 @@ import { SERVE_STARTUP_SERVICE, type ServeOptions } from './serve-startup.js'
 export { SERVE_STARTUP_SERVICE } from './serve-startup.js'
 export type { ServeOptions } from './serve-startup.js'
 import { startServeTransport, createAcpRouter } from './http-transport.js'
+import type { GatewayLike, TypertLike } from './host-control.js'
 
 /** Process seams, overridable from tests (mirrors dsh-headless's `internals`). */
 export const internals: {
@@ -53,6 +54,10 @@ interface WebServerLike {
   register(route: { kind: 'exact' | 'prefix'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => unknown }): () => void
 }
 
+interface WebConnectionLike {
+  requestRejection(req: IncomingMessage): 401 | 403 | undefined
+}
+
 /** How long stdin EOF waits for a late web composition before exiting. */
 const WEB_GRACE_MS = 2_000
 
@@ -62,9 +67,16 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const VERSION: string = require('../package.json').version
 
-/** The slice of the jobs service the dsh/changed signal needs. */
+/**
+ * The slice of the jobs registry the dsh/changed signal needs. dsh 0.2
+ * replaced `onJobsChanged(listener)` with a filtered event stream; output
+ * events (`type: 'output'`) are ring appends, not registry changes, and
+ * would flood the throttle-free signal, so only lifecycle events count.
+ */
 interface JobsSignal {
-  onJobsChanged(listener: () => void): () => void
+  readonly events: {
+    subscribe(filter: { owners: 'all' }, listener: (event: { type: string }) => void): () => void
+  }
 }
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
@@ -123,10 +135,23 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       agents: ctx.get('agents'),
       planMode: ctx.get('planMode'),
       commands: ctx.get('commands'),
+      llm: ctx.get('llm'),
+      sessionPersistence: ctx.get('sessionPersistence'),
     }),
     attachments: () => ctx.get('attachments'),
     agentName: config.agentName,
     version: VERSION,
+    // Resolved per call: the gateway and the controllers behind it arrive
+    // with the composition (a web profile mounts many more namespaces than
+    // the bare acp profile), and the catalog reports exactly what is live.
+    hostControl: config.hostControl
+      ? {
+          gateway: () => ctx.get('typertGateway') as GatewayLike | undefined,
+          typert: () => ctx.get('typert') as TypertLike | undefined,
+          serviceAvailable: (name) => ctx.get(name) !== undefined,
+          deny: config.hostControlDeny,
+        }
+      : undefined,
   })
 
   // Watch support (dsh/sessions/watch): the pure translator is injected once
@@ -144,7 +169,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   let disposeJobsSignal: (() => void) | undefined
   function attachJobsSignal(jobs: JobsSignal): void {
     if (disposeJobsSignal !== undefined) return
-    disposeJobsSignal = jobs.onJobsChanged(() => notifyDshChanged(['jobs']))
+    if (typeof jobs.events?.subscribe !== 'function') return
+    disposeJobsSignal = jobs.events.subscribe({ owners: 'all' }, (event) => {
+      if (event.type !== 'output') notifyDshChanged(['jobs'])
+    })
   }
   ctx.effect(() => () => {
     disposeJobsSignal?.()
@@ -158,6 +186,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // long-lived HTTP+SSE endpoint instead of a stdio child. A serve process is
   // closed by its operator (SIGINT/SIGTERM), never by stdin.
   if (serveOptions !== undefined) {
+    if (serveOptions.token === undefined && !isLoopback(serveOptions.host) && config.hostControl) {
+      // Every ACP connection can drive agents AND the host-control plane as
+      // the operator; on a reachable interface without a token that is the
+      // whole machine. Not refused (trusted networks exist), but loud.
+      log(`WARNING: serving on ${serveOptions.host} without --token; any peer that can reach this port has full operator control (sessions, settings, credentials, plugins). Pass --token or set hostControl: false.`)
+    }
     const handle = await startServeTransport(app, serveOptions, (message) => {
       log(`serve: ${message}`)
     })
@@ -181,9 +215,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const mountWeb = (webServer: WebServerLike) => {
     if (webMounted) return
     webMounted = true
-    const router = createAcpRouter(app, { token: config.token, serveUi: false }, log)
+    // DSH Web protects its own API with a Host/Origin fence and a signed
+    // browser cookie. ACP shares the port and the same operator privileges,
+    // so it must pass that fence too. A configured ACP bearer token is an
+    // alternate credential for non-browser clients, never a bypass of 403.
+    const router = createAcpRouter(app, { token: undefined, serveUi: false }, log)
     const dispose = ['/acp', '/acp/stream', '/acp/healthz'].map((path) =>
-      webServer.register({ kind: 'exact', path, handler: (req, res) => router.handle(req, res) }),
+      webServer.register({ kind: 'exact', path, handler: (req, res) => {
+        if (path !== '/acp/healthz') {
+          const connection = ctx.get('connection') as WebConnectionLike | undefined
+          const rejection = connection?.requestRejection(req) ?? (connection === undefined ? 401 : undefined)
+          const bearer = config.token !== undefined && req.headers.authorization === `Bearer ${config.token}`
+          if (rejection === 403 || (rejection === 401 && !bearer)) {
+            res.writeHead(rejection).end(rejection === 403 ? 'forbidden' : 'unauthorized')
+            return
+          }
+        }
+        return router.handle(req, res)
+      } }),
     )
     log('web-mounted: ACP serving on the shared webServer at /acp')
     ctx.effect(() => () => {
@@ -267,6 +316,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   process.on('SIGPIPE', () => {
     // The client went away; stdout writes failing are expected then.
   })
+}
+
+function isLoopback(host: string): boolean {
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host.startsWith('127.')
 }
 
 export default { name, inject, Config, apply, internals }

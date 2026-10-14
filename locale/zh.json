@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "ACP 服务",
+    "description": "通过 Agent Client Protocol 让 Zed 等外部客户端驱动 dsh 代理"
+  }
+}

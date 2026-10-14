@@ -5,8 +5,9 @@
  * lifecycle and connection teardown.
  */
 import assert from 'node:assert/strict'
-import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
+import { execFile, spawn, spawnSync } from 'node:child_process'
+import { promisify } from 'node:util'
+import { mkdtempSync, mkdirSync, readFileSync, existsSync, realpathSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -44,10 +45,16 @@ PASS('installed dsh-acp-server via `dsh plugin add`')
 
 // ── boot serve mode ────────────────────────────────────────────────────────
 const overlay = join(repoRoot, 'test', 'e2e', 'test-acp.overlay.yml')
+const profileDump = spawnSync(dshBin, ['--profile', 'acp', '--dump-config'], {
+  encoding: 'utf8', env: { ...process.env, DSH_HOME: home }, timeout: 30_000,
+})
+assert.equal(profileDump.status, 0, 'can inspect installed ACP composition')
+const hostOverlay = profileDump.stdout.includes('id: workspace-controller')
+  ? [] : ['--patch', join(repoRoot, 'test', 'e2e', 'host-control.overlay.yml')]
 const stderrLog = '/tmp/dsh-acp-serve-stderr.log'
 const { openSync } = await import('node:fs')
 const stderrFd = openSync(stderrLog, 'w')
-const child = spawn(dshBin, ['--profile', 'acp', '--patch', overlay, 'serve', '--port', '0'], {
+const child = spawn(dshBin, ['--profile', 'acp', ...hostOverlay, '--patch', overlay, 'serve', '--port', '0'], {
   cwd: project,
   env: { ...process.env, DSH_HOME: home },
   stdio: ['ignore', 'pipe', stderrFd],
@@ -79,6 +86,10 @@ PASS(`serve listening on :${port}`)
 
 // ── HTTP+SSE ACP client ────────────────────────────────────────────────────
 const base = `http://127.0.0.1:${port}`
+const execFileAsync = promisify(execFile)
+const cli = (args) => execFileAsync(process.execPath, [join(repoRoot, 'bin', 'dsh-acp.mjs'), ...args, '--url', base], {
+  cwd: project, env: { ...process.env, DSH_HOME: home }, timeout: 60_000,
+})
 let nextId = 1
 const pending = new Map()
 const notifications = []
@@ -328,7 +339,11 @@ try {
   // standard session/load: close, then replay history as chunks
   await withTimeout(send(connectionId, 'session/close', { sessionId: session.sessionId }), 60_000, 'close before load')
   const loaded = await withTimeout(send(connectionId, 'session/load', { sessionId: session.sessionId, cwd: project, mcpServers: [] }), 120_000, 'session/load')
-  assert.deepEqual(loaded, {}, 'session/load response is empty per spec')
+  // 0.13.0: session/load advertises configOptions (the LoadSessionResponse
+  // field in the ACP schema) — the model select at minimum, since the serve
+  // composition always provides the llm service.
+  assert.ok(Array.isArray(loaded.configOptions), 'session/load response carries configOptions')
+  assert.ok(loaded.configOptions.some((option) => option.id === 'model' && option.type === 'select'), 'the model select is advertised on load')
   const replayUser = notifications.filter((n) => n.params?.update?.sessionUpdate === 'user_message_chunk' && String(n.params.update.messageId).startsWith('load-'))
   const replayAgent = notifications.filter((n) => n.params?.update?.sessionUpdate === 'agent_message_chunk' && String(n.params.update.messageId).startsWith('load-'))
   assert.ok(replayUser.length > 0 && replayAgent.length > 0, 'replayed both user and agent history')
@@ -342,6 +357,31 @@ try {
   const resumed = await withTimeout(send(connectionId, 'dsh/sessions/resume', { sessionId: session.sessionId }), 120_000, 'dsh/sessions/resume')
   assert.equal(resumed.sessionId, session.sessionId, 'resume reopens the persisted id')
   PASS('dsh/sessions/resume reopens the closed persisted session')
+
+  // Exercise the actual CLI's HTTP client and subcommands against this
+  // running process; spawning a private child cannot pass these assertions.
+  const catalog = JSON.parse((await cli(['catalog', 'workspace', '--json'])).stdout)
+  assert.ok(catalog.methods.some((method) => method.endpoint === 'workspace/create'))
+  const workspace = JSON.parse((await cli(['call', 'workspace/create', JSON.stringify({ request: { path: project } })])).stdout).workspace
+  assert.equal(workspace.path, realpathSync(project))
+  const followed = await cli(['stream', 'workspace/follow', '--limit', '1'])
+  assert.equal(followed.stdout.trim().split('\n').length, 1)
+  assert.match(followed.stdout, new RegExp(workspace.id))
+  await assert.rejects(cli(['stream', 'workspace/follow', '--timeout', '0.2']), (error) => error.code === 2)
+  const found = JSON.parse((await cli(['rpc', 'dsh/sessions/search', JSON.stringify({ query: session.sessionId })])).stdout)
+  assert.ok(found.sessions.some((candidate) => candidate.id === session.sessionId))
+  PASS('CLI catalog/call/stream/rpc drive a running HTTP server; stream timeout exits 2')
+
+  const run = JSON.parse((await cli(['run', 'Say hello', '--json', '--cwd', project])).stdout)
+  assert.equal(run.stopReason, 'end_turn')
+  assert.match(run.text, /Hello from dsh-acp mock/)
+  const detached = JSON.parse((await cli(['run', 'SLOW detached task', '--json', '--cwd', project, '--detach', '--permission-policy', 'auto'])).stdout)
+  assert.equal(detached.detached, true)
+  const waited = JSON.parse((await cli(['rpc', 'dsh/sessions/wait', JSON.stringify({ sessionId: detached.sessionId, timeoutMs: 30_000 })])).stdout)
+  assert.equal(waited.idle, true)
+  const transcript = JSON.parse((await cli(['rpc', 'dsh/sessions/read', JSON.stringify({ sessionId: detached.sessionId })])).stdout)
+  assert.ok(transcript.entries.some((entry) => entry.text.includes('Second chunk.')))
+  PASS('CLI run --url streams the result; --detach keeps the task alive after disconnect')
 
   const del = await fetch(`${base}/acp`, { method: 'DELETE', headers: { 'acp-connection-id': connectionId } })
   assert.equal(del.status, 204)

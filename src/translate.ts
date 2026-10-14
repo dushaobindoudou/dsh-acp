@@ -183,5 +183,64 @@ export function promptImages(prompt: readonly AcpContentBlock[]): PromptImage[] 
   )
 }
 
+/** The token-accounting slice of a dsh `assistant/message` event (TokenUsage). */
+export interface TokenUsageLike {
+  inputTokens: number
+  outputTokens: number
+  totalTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  reasoningTokens?: number
+}
+
+/** Running totals for one turn, already shaped like the ACP `Usage` payload. */
+export interface UsageTotals {
+  totalTokens: number
+  inputTokens: number
+  outputTokens: number
+  thoughtTokens?: number
+  cachedReadTokens?: number
+  cachedWriteTokens?: number
+}
+
+export function emptyUsageTotals(): UsageTotals {
+  return { totalTokens: 0, inputTokens: 0, outputTokens: 0 }
+}
+
+/**
+ * Fold one model call's usage into the turn totals. dsh counts are DISJOINT
+ * (inputTokens is uncached input only; cache reads/writes travel separately),
+ * so the full footprint is the sum; the adapter's own total wins when present.
+ */
+export function accumulateUsage(totals: UsageTotals, usage: TokenUsageLike): UsageTotals {
+  const callTotal = contextUsedOf(usage)
+  totals.totalTokens += callTotal
+  totals.inputTokens += usage.inputTokens
+  totals.outputTokens += usage.outputTokens
+  if (usage.reasoningTokens !== undefined) totals.thoughtTokens = (totals.thoughtTokens ?? 0) + usage.reasoningTokens
+  if (usage.cacheReadTokens !== undefined) totals.cachedReadTokens = (totals.cachedReadTokens ?? 0) + usage.cacheReadTokens
+  if (usage.cacheWriteTokens !== undefined) totals.cachedWriteTokens = (totals.cachedWriteTokens ?? 0) + usage.cacheWriteTokens
+  return totals
+}
+
+/** The context footprint of ONE model call (tokens in context after it). */
+export function contextUsedOf(usage: TokenUsageLike): number {
+  if (usage.totalTokens !== undefined) return usage.totalTokens
+  return usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) + usage.outputTokens
+}
+
+/** The ACP `PromptResponse.usage` payload, or `undefined` when nothing was reported. */
+export function acpUsageOf(totals: UsageTotals | undefined): UsageTotals | undefined {
+  if (totals === undefined) return undefined
+  if (totals.inputTokens === 0 && totals.outputTokens === 0 && totals.totalTokens === 0) return undefined
+  return totals
+}
+
+/** A context-usage `usage_update` payload, or `undefined` when the window is unknown. */
+export function contextUsageUpdateOf(usage: TokenUsageLike, contextWindow: number | undefined): { used: number; size: number } | undefined {
+  if (contextWindow === undefined || contextWindow <= 0) return undefined
+  return { used: contextUsedOf(usage), size: contextWindow }
+}
+
 /** dsh image media types accepted by the version-one attachment path. */
 export const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const

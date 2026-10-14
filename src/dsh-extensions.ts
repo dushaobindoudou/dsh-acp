@@ -22,6 +22,7 @@ import { RequestError } from '@agentclientprotocol/sdk'
 import type { AgentApp, AgentContext } from '@agentclientprotocol/sdk'
 import { extractSessionEventText } from '@deepseek-ai/dsh-session-query'
 import { watchSession, unwatchSession } from './watch.js'
+import { connectionKeyOf, onConnectionClosed, type ConnectionKey } from './connections.js'
 
 /** The capability key inside `clientCapabilities._meta`. */
 export const DSH_EXTENSIONS_KEY = 'dsh/extensions'
@@ -31,7 +32,10 @@ export type DshChangedTopic = 'sessions' | 'jobs' | 'goals' | 'agents' | 'skills
 
 // ── opt-in registry ────────────────────────────────────────────────────────
 
-const extensionClients = new Set<AgentContext>()
+const extensionClients = new Map<ConnectionKey, AgentContext>()
+onConnectionClosed((key) => {
+  extensionClients.delete(key)
+})
 
 /**
  * Record one connection's extension opt-in from its `initialize` params.
@@ -39,13 +43,14 @@ const extensionClients = new Set<AgentContext>()
  */
 export function registerExtensionClient(
   client: AgentContext | undefined,
-  params: { clientCapabilities?: { _meta?: Record<string, unknown> } },
+  params: { clientCapabilities?: { _meta?: Record<string, unknown> | null } },
 ): boolean {
-  if (client === undefined) return false
+  const key = connectionKeyOf(client)
+  if (client === undefined || key === undefined) return false
   const meta = params.clientCapabilities?._meta
-  const optedIn = meta !== undefined && Boolean(meta[DSH_EXTENSIONS_KEY])
-  if (optedIn) extensionClients.add(client)
-  else extensionClients.delete(client)
+  const optedIn = meta !== undefined && meta !== null && Boolean(meta[DSH_EXTENSIONS_KEY])
+  if (optedIn) extensionClients.set(key, client)
+  else extensionClients.delete(key)
   return optedIn
 }
 
@@ -55,10 +60,10 @@ export function registerExtensionClient(
  * or ended stdio stream) and prunes the entry.
  */
 export function notifyDshChanged(topics: readonly DshChangedTopic[]): void {
-  for (const client of extensionClients) {
+  for (const [key, client] of extensionClients) {
     client.notify('dsh/changed', { topics: [...topics] })
       .catch(() => {
-        extensionClients.delete(client)
+        extensionClients.delete(key)
       })
       .catch(() => undefined)
   }
@@ -84,9 +89,11 @@ export interface DshServiceSnapshot {
     )>>
   }
   readonly jobs?: {
+    /** dsh 0.2 JobView: `owner` (was `ownerSession`), plus progress/detail lines. */
     list(): ReadonlyArray<{
       id: string; kind: string; label: string; status: string
-      ownerSession?: string; startedAt: number; finishedAt?: number
+      owner?: string; progress?: string; detail?: string
+      startedAt: number; finishedAt?: number
     }>
   }
   readonly goals?: {
@@ -105,6 +112,7 @@ export interface DshServiceSnapshot {
   readonly agents?: {
     list(): ReadonlyArray<{
       id: string
+      status?: string
       options?: { provider?: string; model?: string }
       session?: { header?: { cwd?: string; parentSession?: string } }
     }>
@@ -124,6 +132,22 @@ export interface DshServiceSnapshot {
      */
     execute(agent: unknown, line: string, images: readonly unknown[], signal: AbortSignal): Promise<{ commandId: string; result: { kind: string; text?: string } } | undefined>
   }
+  /** Model/provider registry backing session/set_config_option and usage updates. */
+  readonly llm?: {
+    listProviders(): ReadonlyArray<{ id: string; name: string }>
+    listModels(provider: string): Promise<ReadonlyArray<{ id: string; name: string; description?: string }>>
+    resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{
+      context?: { contextWindow: number }
+      reasoning?: { efforts: ReadonlyArray<{ id: string; name: string; description?: string }>; defaultEffort?: string }
+    }>
+  }
+  /** Durable session storage backing session/delete (stat + cross-process write claim). */
+  readonly sessionPersistence?: {
+    stat(id: string, options?: { signal?: AbortSignal }): Promise<unknown>
+    open(id: string, access: 'read' | 'write', options?: { signal?: AbortSignal }): Promise<{ close(): Promise<void> }>
+    /** The JSONL backend exposes its root (`$DSH_HOME/sessions` by default). */
+    readonly config?: { readonly root?: string }
+  }
 }
 
 export interface DshExtensionDeps {
@@ -131,6 +155,8 @@ export interface DshExtensionDeps {
   readonly services: () => DshServiceSnapshot
   /** Live ACP session ids (as dsh session ids) currently open here. */
   readonly openDshSessionIds: () => ReadonlySet<string>
+  /** The ACP table entry of a session, when it is open here. */
+  readonly entryOf?: (sessionId: string) => { adopted: boolean; permissionPolicy: string; client: unknown } | undefined
   readonly log: (message: string) => void
 }
 
@@ -148,7 +174,7 @@ function unavailable(method: string, service: string): RequestError {
 export function onVendorRequest(
   app: AgentApp,
   method: string,
-  handler: (rc: { params?: unknown; client?: AgentContext | undefined }) => Promise<unknown>,
+  handler: (rc: { params?: unknown; client?: AgentContext | undefined; signal?: AbortSignal }) => Promise<unknown>,
 ): void {
   // The SDK requires a params parser for non-standard methods; a pass-through
   // keeps validation in the handlers themselves (they already reject bad
@@ -221,7 +247,7 @@ export function attachDshExtensions(app: AgentApp, deps: DshExtensionDeps): Agen
       if (typeof sessionId !== 'string' || sessionId.length === 0) {
         throw new RequestError(-32602, 'dsh/sessions/read requires a sessionId')
       }
-      const limitRaw = (params as { limit?: unknown }).limit
+      const limitRaw = (params as { limit?: unknown } | undefined)?.limit
       const limit = typeof limitRaw === 'number' && Number.isFinite(limitRaw) && limitRaw > 0
         ? Math.min(Math.floor(limitRaw), 1000)
         : 200
@@ -239,13 +265,52 @@ export function attachDshExtensions(app: AgentApp, deps: DshExtensionDeps): Agen
       }
       return { sessionId, entries: entries.slice(-limit) }
     })
+  onVendorRequest(app, 'dsh/sessions/search', async ({ params }) => {
+      const query = deps.services().sessionQuery
+      if (query === undefined) throw unavailable('dsh/sessions/search', 'sessionQuery')
+      const text = (params as { query?: unknown } | undefined)?.query
+      if (typeof text !== 'string' || text.trim().length === 0) {
+        throw new RequestError(-32602, 'dsh/sessions/search requires a non-empty query')
+      }
+      const needle = text.trim().toLocaleLowerCase()
+      const limitRaw = (params as { limit?: unknown } | undefined)?.limit
+      const limit = typeof limitRaw === 'number' && Number.isInteger(limitRaw) && limitRaw > 0
+        ? Math.min(limitRaw, 100) : 50
+      const records = await query.listSessions()
+      const titles = new Map<string, string>()
+      try {
+        for (const observation of await query.readTitleSnapshots(records.map((record) => record.header.id))) {
+          if ('value' in observation && observation.value.title !== undefined) {
+            titles.set(observation.sessionId, observation.value.title.title)
+          }
+        }
+      } catch { /* Search still works on ids and cwd when title reads fail. */ }
+      const matches = records
+        .filter((record) => [record.header.id, record.header.cwd ?? '', titles.get(record.header.id) ?? '']
+          .some((field) => field.toLocaleLowerCase().includes(needle)))
+        .sort((a, b) => b.header.createdAt - a.header.createdAt)
+      return {
+        sessions: matches.slice(0, limit).map((record) => ({
+          id: record.header.id,
+          title: titles.get(record.header.id),
+          cwd: record.header.cwd,
+          parentSession: record.header.parentSession,
+          createdAt: record.header.createdAt,
+          live: record.live,
+          persisted: record.persisted,
+        })),
+        hasMore: matches.length > limit,
+      }
+    })
   onVendorRequest(app, 'dsh/jobs/list', async () => {
       const jobs = deps.services().jobs
       if (jobs === undefined) throw unavailable('dsh/jobs/list', 'jobs')
       return {
         jobs: jobs.list().map((job) => ({
           id: job.id, kind: job.kind, label: job.label, status: job.status,
-          ownerSession: job.ownerSession, startedAt: job.startedAt, finishedAt: job.finishedAt,
+          // `ownerSession` stays on the wire for existing clients (webui.html).
+          ownerSession: job.owner, progress: job.progress, detail: job.detail,
+          startedAt: job.startedAt, finishedAt: job.finishedAt,
         })),
       }
     })
@@ -288,14 +353,22 @@ export function attachDshExtensions(app: AgentApp, deps: DshExtensionDeps): Agen
       if (agentsService === undefined) throw unavailable('dsh/agents/tree', 'agents')
       const open = deps.openDshSessionIds()
       return {
-        agents: agentsService.list().map((liveAgent) => ({
-          sessionId: liveAgent.id,
-          provider: liveAgent.options?.provider,
-          model: liveAgent.options?.model,
-          cwd: liveAgent.session?.header?.cwd,
-          parentSession: liveAgent.session?.header?.parentSession,
-          acp: open.has(liveAgent.id),
-        })),
+        agents: agentsService.list().map((liveAgent) => {
+          const entry = deps.entryOf?.(liveAgent.id)
+          return {
+            sessionId: liveAgent.id,
+            // idle | running: an orchestrator's "which of my tasks are done".
+            status: liveAgent.status,
+            provider: liveAgent.options?.provider,
+            model: liveAgent.options?.model,
+            cwd: liveAgent.session?.header?.cwd,
+            parentSession: liveAgent.session?.header?.parentSession,
+            acp: open.has(liveAgent.id),
+            ...entry !== undefined
+              ? { adopted: entry.adopted, permissionPolicy: entry.permissionPolicy, attached: entry.client !== undefined }
+              : {},
+          }
+        }),
       }
     })
   dshWatchHandlers(app)

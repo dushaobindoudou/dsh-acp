@@ -40,7 +40,15 @@ function permissionOptions(offerAlways: boolean): PermissionOption[] {
     : ALL_PERMISSION_OPTIONS.filter((option) => option.kind === 'allow_once' || option.kind === 'reject_once')
 }
 
-/** Register the agent-scoped approval answerer for one ACP session. */
+/**
+ * Register the agent-scoped approval answerer for one ACP session. The
+ * session's `permissionPolicy` decides first: `auto` grants once and `deny`
+ * rejects without a round trip (unattended orchestration); `ask` routes the
+ * question to the bound client, and with no client bound (a detached task,
+ * a closed connection) falls through to the next dsh answerer — the web
+ * GUI in a web composition, dsh's fail-closed default otherwise.
+ * @returns the listener disposer (adopted agents detach through it).
+ */
 export function attachPermBridge(
   agentCtx: Context,
   sessionId: string,
@@ -48,12 +56,22 @@ export function attachPermBridge(
   offerAlways: boolean,
   context: () => AgentContext | undefined,
   log: (message: string) => void,
-): void {
+): () => unknown {
   const options = permissionOptions(offerAlways)
-  agentCtx.on('approval/request', (req: ApprovalRequestLike, next: () => Promise<ApprovalOutcome>) => {
+  return agentCtx.on('approval/request', (req: ApprovalRequestLike, next: () => Promise<ApprovalOutcome>) => {
     if (String(req.agent.id) !== sessionId) return next()
+    if (entry.permissionPolicy === 'auto') {
+      log(`permission auto-granted (policy auto): ${req.toolName} in ${sessionId}`)
+      return Promise.resolve<ApprovalOutcome>('allowed-once')
+    }
+    if (entry.permissionPolicy === 'deny') return Promise.resolve<ApprovalOutcome>('rejected')
+    if (context() === undefined) return next()
     return answerViaAcp(req, entry, options, context, log)
-  })
+    // Prepended: in a web composition the GUI's forwarding answerer is
+    // already on this waterfall and HOLDS the request for a browser. The
+    // client driving this session answers first; whatever it does not take
+    // (`ask` with no client bound) still reaches the GUI through next().
+  }, { prepend: true })
 }
 
 async function answerViaAcp(

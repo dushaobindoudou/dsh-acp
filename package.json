@@ -1,7 +1,8 @@
 {
   "name": "dsh-acp-server",
-  "version": "0.12.0",
+  "version": "0.14.2",
   "description": "Agent Client Protocol (ACP) server plugin for the DeepSeek Harness (dsh) — drive dsh agents from Zed and any ACP client",
+  "icon": "./icon.svg",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -32,6 +33,7 @@
       "default": "./lib/test/mock-llm.js"
     },
     "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
     "./serve-startup": {
       "types": "./lib/serve-startup.d.ts",
       "default": "./lib/serve-startup.js"
@@ -40,6 +42,8 @@
   "files": [
     "lib",
     "bin",
+    "locale",
+    "icon.svg",
     "cordis.patch.yml",
     "webui.html"
   ],
@@ -52,7 +56,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf lib",
     "test": "npm run build && node --test \"test/unit/*.test.mjs\"",
-    "test:e2e": "node test/e2e/e2e.test.mjs && node test/e2e/serve.test.mjs && node test/e2e/webacp.test.mjs && node test/e2e/web-bare.test.mjs",
+    "test:e2e": "node test/e2e/e2e.test.mjs && node test/e2e/run-cli.test.mjs && node test/e2e/serve.test.mjs && node test/e2e/webacp.test.mjs && node test/e2e/web-bare.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "npm run clean && npm run build",
     "prepare": "npm run build"
@@ -61,30 +65,35 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^1.3.0",
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/cordis-plugin-loader": "^1.0.3",
-    "@deepseek-ai/dsh-agent": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-attachment": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-brand": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-cmdline": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-invariants": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-llm": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-scope": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-session": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-query": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-system-prompt": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-timeout": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.2",
-    "@deepseek-ai/schemastery": "^3.18.2",
+    "@agentclientprotocol/sdk": "^1.4.0",
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.5",
+    "@deepseek-ai/dsh-agent": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-settings-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-workspace-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-workspace-files": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-attachment": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-brand": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-cmdline": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-host-directory-picker-browse": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-invariants": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-scope": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-session-query": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-timeout": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-workspace": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4",
     "commander": "^15.0.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-tool-todo": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-tools": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-user-approval": "^0.1.2-rc.1",
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-tool-todo": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-user-approval": "^0.2.0-rc.2",
     "@types/node": "^24",
     "typescript": "^5.6"
   },

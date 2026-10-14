@@ -4,6 +4,104 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+## [0.14.2] - 2026-10-14
+
+- Let client subcommands flush stdout before exiting, so large host-control
+  responses such as `settings/describe` remain valid JSON.
+
+## [0.14.1] - 2026-10-14
+
+- Aligned workspace, workspace files, directory browser, and settings host
+  controllers with DSH 0.2.0-rc.2. The 0.14.0 bundle used 0.1.5 controllers
+  that DSH 0.2 disables as incompatible, leaving the Remote catalog incomplete.
+- Pinned the E2E runtime to DSH 0.2.0-rc.2 so its plugin compatibility checks
+  cover the runtime this release targets.
+
+## [0.14.0] - 2026-10-13
+
+- Added CLI access to running HTTP servers (`--url` / `DSH_ACP_URL`) for
+  `run`, `catalog`, `call`, `stream`, and `rpc`, including detached tasks.
+- Added form-mode user-question elicitation with permission-button fallback
+  and unattended session policies. Already-cancelled questions no longer
+  open a client dialog.
+- Fixed HTTP client network failures reaching the connection's error
+  listener; transport shutdown now aborts SSE before bounded DELETE cleanup.
+- Invalid CLI timeouts and stream limits fail before connecting.
+- Added regression coverage for question mappings, policies, cancellation,
+  HTTP client failures and shutdown, and CLI control of a running server.
+- Added a Typert backed `dsh/remote/*` host control plane with live catalog,
+  unary and streaming calls, cancellation, endpoint deny rules, and method
+  availability during startup. The standalone ACP profile now mounts the
+  workspace, directory browser, workspace file, and settings controllers.
+- Added `dsh/sessions/search` for session IDs, titles, and working directories;
+  documented the session dispatch and resume workflow for orchestrators.
+- Web-mounted ACP now shares DSH Web's Host/Origin and login-cookie checks;
+  a configured ACP bearer token is an alternate credential for scripts.
+- Verified workspace creation, settings updates, session discovery and
+  switching against a disposable DSH home, plus the Web composition's full
+  session/workspace/settings Remote catalog.
+
+## [0.13.0] - 2026-10-01
+
+The orchestration release: the ACP surface an external agent needs to drive
+dsh from a script — per-session model/effort overrides, one-shot task runs,
+session cleanup, and token usage — plus honest capability advertisement.
+
+### Added
+
+- **`session/set_config_option`** (agent method): per-session overrides of
+  the model select and the reasoning-effort select, answered with the full
+  `configOptions` state. The model select is valued `<provider>/<model>` and
+  built live from the llm registry (`listProviders` × `listModels`, each read
+  under a soft deadline so a stalled catalog never stalls the session);
+  the reasoning-effort select appears only when the CURRENT route declares
+  efforts via `resolveModelInfo`. Overrides ride dsh's agent-scoped model
+  selection: a switch takes effect on the NEXT step (no mount-time
+  snapshot), an effort set on a route without efforts is refused with a
+  precise `-32602` instead of being silently ignored, and a successful set
+  pushes `config_option_update` with the new state. `session/new`,
+  `session/load` and `session/resume` responses now carry `configOptions`.
+- **`authenticate`** (agent method): no-op success immediately after the
+  handshake (empty `authMethods` stays), matching official dsh-acp; strict
+  clients no longer get `-32601`.
+- **`session/delete`** (agent method; `sessionCapabilities.delete` now
+  advertised): removes a persisted session's artifact directory from the
+  JSONL backend root. Refuses BEFORE touching bytes: open in this process's
+  ACP table, live elsewhere in this process, write-claimed by another
+  process (kernel lock probe), or no artifact directory found.
+- **Token usage**: every `assistant/message` that reports token accounting
+  now drives a `usage_update` (`used` = that call's full context footprint,
+  `size` = the route's context window, silent when the window is unknown),
+  and `session/prompt` responses carry the turn's summed `usage`
+  (input/output/thought/cache tokens; the experimental ACP field).
+- **One-shot CLI `run`** (`dsh-acp-server run "task"`): drive one task from
+  any script without implementing ACP. It spawns the real
+  `dsh --profile acp` and speaks the same protocol through the SDK client —
+  no second implementation, no bypass. Flags: `--cwd`, `--json` (one
+  `{sessionId, stopReason, text, toolCalls, usage?, error?}` object),
+  `--session <id>` (resume; no cold plugin-tree start per task), `--model
+  <provider>/<model>` (maps to `session/set_config_option`), `--timeout
+  <seconds>` (cancels via `$/cancel_request` + `session/cancel`),
+  `--permission-policy auto|ask|deny`, repeatable `--attach <file>` (images
+  ride image blocks, other files inline as text). Exit codes: `0` done ·
+  `1` error · `2` timeout · `3` cancelled · `4` permission denied.
+- `session/resume` / `session/load` fail with a precise `unknown session`
+  `-32602` when the id has no persisted artifact, instead of surfacing the
+  agents-service failure as a generic internal error.
+
+### Fixed
+
+- **fs methods are honestly out of scope**: the server never calls
+  `fs/read_text_file` / `fs/write_text_file` — dsh tools read and write the
+  host filesystem in-process, so a client that declared the fs capability
+  would never be contacted. Documented in the README method table instead of
+  advertised and left dead.
+- The e2e mock LLM now declares two models (`mock-1`, and `mock-2` with
+  adapter-declared reasoning efforts), which is what makes the
+  config-option and refusal paths exercised above deterministic.
+
 ## [0.12.0] - 2026-09-18
 
 dsh 0.1.5-rc.2 compatibility release. The 0.1.5 session-event changes removed

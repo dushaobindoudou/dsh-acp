@@ -29,6 +29,15 @@ export interface Config {
    * standalone `serve` mode takes it from its own --token flag).
    */
   token?: string
+  /**
+   * Expose the host-control plane (`dsh/remote/*`): every Remote method the
+   * dsh GUI calls (workspaces, sessions, settings, credentials, schedules,
+   * plugins, terminals, …), invoked in-process as the operator. Turn it off
+   * for a server that must only ever run conversations.
+   */
+  hostControl: boolean
+  /** Endpoint patterns the host-control plane refuses: `ns/method`, `ns/*`, or `*`. */
+  hostControlDeny: string[]
 }
 
 export const Config = z.object({
@@ -38,6 +47,8 @@ export const Config = z.object({
   offerAlwaysPermissions: z.boolean().default(true).description('offer allow_always / reject_always permission options'),
   flushOnTurnEnd: z.boolean().default(true).description('flush session persistence after every completed turn'),
   token: z.string().description('bearer token required by the HTTP transport when mounted in a web composition'),
+  hostControl: z.boolean().default(true).description('expose dsh/remote/* (every GUI Remote method, as the operator) to ACP clients'),
+  hostControlDeny: z.array(z.string()).default([]).description('Remote endpoints refused by dsh/remote/*: "ns/method", "ns/*", or "*"'),
 })
 
 /** Resolve the effective model selection: the pin, or the profile default. */
