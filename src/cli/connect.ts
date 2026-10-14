@@ -9,6 +9,7 @@ import type { ClientApp, ClientContext } from '@agentclientprotocol/sdk'
 import { spawn } from 'node:child_process'
 import { Readable, Writable } from 'node:stream'
 import { httpClientStream } from './http-client.js'
+import { ensureAcpProfile } from './bootstrap.js'
 
 export interface ServerTarget {
   /** Running server base URL; absent spawns a private stdio child. */
@@ -83,6 +84,7 @@ export async function openServer(
     connection = app.connect(stream)
     closeTransport = () => stream.close()
   } else {
+    if (target.command === undefined) ensureAcpProfile()
     const command = childCommand(target)
     const child = spawn(command[0]!, command.slice(1), { cwd: target.cwd, env: process.env, stdio: ['pipe', 'pipe', 'inherit'] })
     const exited = new Promise<void>((resolve) => child.on('close', () => resolve()))

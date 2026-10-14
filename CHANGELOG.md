@@ -10,6 +10,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Let client subcommands flush stdout before exiting, so large host-control
   responses such as `settings/describe` remain valid JSON.
+- Delay private ACP profile bootstrap until after CLI argument validation, so
+  invalid commands fail cleanly on a fresh installation.
 
 ## [0.14.1] - 2026-10-14
 
