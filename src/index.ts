@@ -37,6 +37,7 @@ export { SERVE_STARTUP_SERVICE } from './serve-startup.js'
 export type { ServeOptions } from './serve-startup.js'
 import { startServeTransport, createAcpRouter } from './http-transport.js'
 import type { GatewayLike, TypertLike } from './host-control.js'
+import { withOwnerPeer } from './owner-peer.js'
 
 /** Process seams, overridable from tests (mirrors dsh-headless's `internals`). */
 export const internals: {
@@ -146,7 +147,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     // the bare acp profile), and the catalog reports exactly what is live.
     hostControl: config.hostControl
       ? {
-          gateway: () => ctx.get('typertGateway') as GatewayLike | undefined,
+          gateway: withOwnerPeer(ctx, () => ctx.get('typertGateway') as GatewayLike | undefined),
           typert: () => ctx.get('typert') as TypertLike | undefined,
           serviceAvailable: (name) => ctx.get(name) !== undefined,
           deny: config.hostControlDeny,

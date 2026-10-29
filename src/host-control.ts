@@ -17,12 +17,13 @@
  *                       end:   dsh/remote/end  {streamId, reason, error?}
  *   dsh/remote/cancel   cancel an open stream
  *
- * Calls run in-process as the operator (no Peer), exactly like a local
- * carrier. `hostControl: false` removes the plane; `hostControlDeny` refuses
+ * Calls run in-process as the operator, through one owner Peer (see
+ * owner-peer.ts), exactly like a local carrier. `hostControl: false` removes the plane; `hostControlDeny` refuses
  * selected endpoints (`ns/*`, `ns/method`).
  */
 import { RequestError } from '@agentclientprotocol/sdk'
 import type { AgentApp, AgentContext } from '@agentclientprotocol/sdk'
+import type { PeerScope } from '@deepseek-ai/dsh-typert-protocol'
 import { randomUUID } from 'node:crypto'
 import { onVendorRequest } from './dsh-extensions.js'
 import { connectionKeyOf, onConnectionClosed, type ConnectionKey } from './connections.js'
@@ -42,11 +43,20 @@ import {
   type PackageModelLike,
 } from './wire.js'
 
+/** One gateway request; `peer` is filled in by `withOwnerPeer` when absent. */
+export interface GatewayRequest {
+  namespace: string
+  method: string
+  args: Record<string, unknown>
+  signal?: AbortSignal
+  peer?: PeerScope
+}
+
 /** The slice of `ctx.typertGateway` this plane drives. */
 export interface GatewayLike {
   readonly wireStream: { failure(error: unknown): { code: string; message: string; details: object } }
-  invoke(request: { namespace: string; method: string; args: Record<string, unknown>; signal?: AbortSignal }): Promise<unknown>
-  stream(request: { namespace: string; method: string; args: Record<string, unknown>; signal?: AbortSignal }): Promise<AsyncIterable<unknown>>
+  invoke(request: GatewayRequest): Promise<unknown>
+  stream(request: GatewayRequest): Promise<AsyncIterable<unknown>>
 }
 
 /** The slice of `ctx.typert` (the Typert registry) the catalog reads. */

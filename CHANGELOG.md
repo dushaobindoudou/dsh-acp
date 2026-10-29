@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.14.4] - 2026-10-29
+
+- Stopped the bundle's directory-picker row from replacing dsh-web-app's auto
+  picker in the Web profile (both used the id `directory-picker`). On DSH
+  0.2.1 that row mounts the client directory flow, so "Add workspace" vanished
+  from the sidebar and the new-session picker. The ACP row now has its own id
+  and is disabled when dsh-web-app is loaded.
+- Fixed every `dsh/remote/invoke` and `dsh/remote/stream` call on DSH 0.2.1,
+  which requires a Peer on each gateway request ("Cannot read properties of
+  undefined (reading 'signal')"). Host-control calls now speak for one owner
+  Peer bound to the plugin's lifetime; adopted-session model switches use it
+  too.
+- Dropped the `{{cwd}}` persona suffix. DSH 0.2.1 registers only
+  `{{provider}}` and `{{model}}` and states the working directory in user
+  context, so every turn in the standalone ACP profile failed with "unknown
+  prompt variable".
+
+## [0.14.3] - 2026-10-28
+
+- Refreshed `@deepseek-ai` dependencies to `^0.2.1-rc.2` for DSH 0.2.1, dropped
+  the unused `@deepseek-ai/dsh-invariants`, and aligned
+  `@deepseek-ai/schemastery` to `~3.18.5`.
+
 ## [0.14.2] - 2026-10-14
 
 - Let client subcommands flush stdout before exiting, so large host-control

@@ -26,12 +26,13 @@
   disabled: true
 
 # dsh 0.2 split the deployment persona into prefix/suffix sections (the
-# single `persona` key is gone); mirror the official acp bundle's wording.
+# single `persona` key is gone). dsh 0.2.1 registers only {{provider}} and
+# {{model}} and states the working directory in user context itself, so a
+# {{cwd}} suffix fails every turn ("unknown prompt variable").
 - id: system-prompt
   config:
     personaPrefix: >-
       You are a coding agent powered by the {{model}} model.
-    personaSuffix: Your working directory is {{cwd}}.
 
 - insert:
     # Host controllers shared with the Web surface. The ACP Remote bridge
@@ -39,8 +40,14 @@
     # Typert and its gateway, not workspace or settings methods.
     - id: workspace
       name: '@deepseek-ai/dsh-workspace'
-    - id: directory-picker
+    # Own id, not `directory-picker`: the Loader merges rows by id, so reusing
+    # it in the Web profile replaced dsh-web-app's auto picker — the half that
+    # mounts the client directory flow — and hid every "Add workspace" entry.
+    # Web already supplies a picker; this row only serves the bare ACP profile.
+    - id: acp-directory-picker
       name: '@deepseek-ai/dsh-host-directory-picker-browse'
+      disabled: !!js >-
+        ctx.get('profileContext')?.startedBundles?.includes('@deepseek-ai/dsh-web-app') === true
     - id: workspace-controller
       name: '@deepseek-ai/dsh-api-workspace-controller'
     - id: workspace-files

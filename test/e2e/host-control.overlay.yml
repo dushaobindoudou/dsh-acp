@@ -4,7 +4,7 @@
 - insert:
     - id: workspace
       name: '@deepseek-ai/dsh-workspace'
-    - id: directory-picker
+    - id: acp-directory-picker
       name: '@deepseek-ai/dsh-host-directory-picker-browse'
     - id: workspace-controller
       name: '@deepseek-ai/dsh-api-workspace-controller'
